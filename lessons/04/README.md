@@ -125,7 +125,8 @@ gdb-multiarch build/lesson04/kernel.elf
 
 Expect priv=1 at supervisor_main, priv=0 before U ecall and priv=1 in the
 handler; first trap has scause=8, sepc=0x80400010, sstatus.SPP=0. Inspect
-`sscratch` before the entry swap (user sp) versus after (S stack top during U).
+`sscratch` before the U-origin entry swap (S stack top) versus immediately
+after (original user sp); the handler then clears it to zero while in S.
 At the second trap cause=2 and sepc=0x80400020. Use hardware breakpoints because
 payload RAM has not been loaded when GDB first attaches. `p $priv` availability
 is QEMU/GDB-specific; scause/SPP/illegal-CSR behavior remains the architectural
