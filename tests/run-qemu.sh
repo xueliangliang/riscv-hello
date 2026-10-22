@@ -2,6 +2,8 @@
 set -euo pipefail
 
 image=${1:-build/lesson01.elf}
+expected=${2:-Lesson 01: RISC-V entry reached.}
+success_message=${3:-PASS: RISC-V ELF entry and UART output verified.}
 qemu=${QEMU:-qemu-system-riscv64}
 readelf=${READELF:-riscv64-linux-gnu-readelf}
 
@@ -49,8 +51,8 @@ if [ "$status" -ne 0 ]; then
     printf 'QEMU exited with status %d (expected guest test-device success).\n' "$status" >&2
     exit "$status"
 fi
-if ! grep -Fq 'Lesson 01: RISC-V entry reached.' <<<"$output"; then
-    printf 'expected UART line was not observed.\n' >&2
+if ! grep -Fq "$expected" <<<"$output"; then
+    printf 'expected UART line was not observed: %s\n' "$expected" >&2
     exit 1
 fi
-printf 'PASS: RISC-V ELF entry and UART output verified.\n'
+printf '%s\n' "$success_message"

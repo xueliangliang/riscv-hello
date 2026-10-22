@@ -1,13 +1,19 @@
-# RISC-V Bare Metal: Lesson 01
+# RISC-V Bare Metal Lessons
 
-This repository starts a new, clean teaching implementation. The earlier OS
-prototype is kept separately as a reference; this codebase is rebuilt one small,
-reviewable, tested step at a time.
+This is the clean, cumulative teaching repository. The earlier OS prototype
+stays separate as reference material. Each lesson adds one reviewable step;
+annotated tags such as `lesson-01` and `lesson-02` pin the exact state used by
+the matching blog post.
 
-Lesson 01 builds a freestanding RV64 ELF, checks its architecture and entry
-address, then runs it on QEMU's `virt` board. The guest writes one line directly
-to the emulated UART and exits through QEMU's test device. It has no C runtime,
-kernel, interrupts, scheduler, or filesystem yet.
+The current `main` contains two experiments:
+
+- Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
+  The guest writes directly to UART and exits through QEMU's test device.
+- Lesson 02 adds startup code for `gp`/stack/BSS, a small C `main`, and a polled
+  UART driver. It checks BSS, initialized data, stack bounds, and serial output.
+
+Neither lesson is an operating system yet: there is no privilege transition,
+interrupt handling, scheduler, or filesystem.
 
 ## Reproduce
 
@@ -20,11 +26,13 @@ make inspect
 make test
 ```
 
-Expected final line:
+`make test-lesson02` runs only the C-runtime experiment. The full test run
+prints a PASS line for both lessons, including:
 
 ```text
-PASS: RISC-V ELF entry and UART output verified.
+PASS: C runtime, stack, BSS, initialized data, and UART verified.
 ```
 
-Generated files are kept under `build/` and are ignored by Git. The ELF is for
-inspection/debugging; `lesson01.bin` is a raw byte dump without ELF metadata.
+Use `make lesson02` to build only the C-runtime lesson. Generated files stay
+under `build/` and are ignored by Git. Each lesson's ELF is for
+inspection/debugging; its `.bin` file is a raw byte dump without ELF metadata.
