@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The current `main` contains five experiments:
+The current `main` contains six experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -24,12 +24,21 @@ The current `main` contains five experiments:
   adds checked console write/exit syscalls, a freestanding user libc and a
   bounded aligned bump allocator, retaining the lesson03/04 loading/runtime.
 
-The lessons have no interrupts, scheduler or filesystem. Lesson04 enforces
+- [Lesson 06 — 中断：保存现场，再回到原来的程序流](lessons/06/README.md)
+  retains the disk loader and adds three asynchronous Sstc timer interrupts
+  during ordinary U instructions, exact integer-context/PC restoration and
+  user self-checks. This is **not** scheduling or a task switch.
+
+The lessons have no scheduler or filesystem. Lessons01–05 remain unchanged;
+lesson06 owns its interrupt-enabled entry and epilogue. Lesson04 enforces
 instruction privilege but deliberately does **not** isolate memory: PMP allows
 all addresses and there are no page tables. See its specification and tests.
-Run `make lesson04` / `make test-lesson04` or `make lesson05` /
-`make test-lesson05` for each new experiment; full `make test` keeps all earlier
-regressions. Guest logs are under `build/lesson04/` and `build/lesson05/`.
+Run `make lesson04` / `make test-lesson04`, `make lesson05` /
+`make test-lesson05`, or `make lesson06` / `make test-lesson06`;
+full `make test` keeps all earlier regressions. Guest logs are under
+`build/lesson04/`, `build/lesson05/` and `build/lesson06/`.
+Lesson06 explicitly uses QEMU `-cpu rv64,sstc=true`; it does not use OpenSBI,
+an M-mode timer relay, PLIC timer interrupts or cooperative yielding.
 
 ## Reproduce
 

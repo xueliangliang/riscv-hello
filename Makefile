@@ -225,3 +225,63 @@ inspect: inspect-lesson05
 
 clean:
 	rm -rf build
+
+# Lesson06 owns its interrupt-enabled entry/epilogue; prior runtimes stay fixed.
+TIMER_COMMON := build/lesson06/start.o build/lesson04/runtime.o build/lesson02/uart.o
+TIMER_FLAGS := $(PRIV_CFLAGS) -Ibuild/lesson06
+TIMER_VARIANTS := bad-context bad-pc omit-pc
+
+build/lesson06:
+	mkdir -p $@
+
+build/lesson06/%.o: lessons/06/%.S | build/lesson06
+	$(CC) $(TIMER_FLAGS) -c -o $@ $<
+
+build/lesson06/user.elf: build/lesson06/user.o lessons/04/user.ld
+	$(CC) $(TIMER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/04/user.ld -o $@ $<
+
+build/lesson06/user-symbols.h: build/lesson06/user.elf lessons/06/symbols.py
+	$(PYTHON) lessons/06/symbols.py $(CROSS_COMPILE)nm $< $@
+
+build/lesson06/kernel.o: lessons/06/kernel.c build/lesson06/user-symbols.h lessons/04/runtime.h
+	$(CC) $(TIMER_FLAGS) -c -o $@ $<
+
+build/lesson06/trap-bad-context.o: lessons/06/trap.S | build/lesson06
+	$(CC) $(TIMER_FLAGS) -DBAD_CONTEXT -c -o $@ $<
+
+build/lesson06/trap-bad-pc.o: lessons/06/trap.S | build/lesson06
+	$(CC) $(TIMER_FLAGS) -DBAD_PC -c -o $@ $<
+
+build/lesson06/trap-omit-pc.o: lessons/06/trap.S | build/lesson06
+	$(CC) $(TIMER_FLAGS) -DOMIT_PC -c -o $@ $<
+
+build/lesson06/kernel.elf: $(TIMER_COMMON) build/lesson06/trap.o build/lesson06/kernel.o lessons/03/kernel.ld
+	$(CC) $(TIMER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/03/kernel.ld -o $@ $(TIMER_COMMON) build/lesson06/trap.o build/lesson06/kernel.o
+
+build/lesson06/kernel-%.elf: $(TIMER_COMMON) build/lesson06/trap-%.o build/lesson06/kernel.o lessons/03/kernel.ld
+	$(CC) $(TIMER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/03/kernel.ld -o $@ $(TIMER_COMMON) build/lesson06/trap-$*.o build/lesson06/kernel.o
+
+build/lesson06/%.bin: build/lesson06/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+
+build/lesson06/disk.img: build/lesson06/kernel.bin build/lesson06/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson06/user.bin $@
+
+build/lesson06/disk-%.img: build/lesson06/kernel-%.bin build/lesson06/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson06/user.bin $@
+
+.PHONY: lesson06 test-lesson06 inspect-lesson06
+lesson06: build/lesson03/bootloader.elf build/lesson06/disk.img
+all: lesson06
+
+test-lesson06: lesson06 $(addprefix build/lesson06/disk-,$(addsuffix .img,$(TIMER_VARIANTS)))
+	QEMU="$(QEMU)" NM="$(CROSS_COMPILE)nm" OBJDUMP="$(OBJDUMP)" $(PYTHON) lessons/06/test.py
+
+test: test-lesson06
+
+inspect-lesson06: build/lesson06/kernel.elf build/lesson06/user.elf
+	$(READELF) -h -lW build/lesson06/kernel.elf build/lesson06/user.elf
+	$(OBJDUMP) -d build/lesson06/kernel.elf build/lesson06/user.elf
+
+inspect: inspect-lesson06
