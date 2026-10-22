@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The current `main` contains four experiments:
+The current `main` contains five experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -20,12 +20,16 @@ The current `main` contains four experiments:
 - [Lesson 04 — 从 M-mode 到 S-mode，再到 U-mode](lessons/04/README.md)
   reuses that disk loader, enters S then U, and proves U origin with delegated
   ecall/illegal-CSR traps, exact cause/PC checks and context restoration.
+- [Lesson 05 — 给应用一套最小接口：syscall、mini-libc 与 heap](lessons/05/README.md)
+  adds checked console write/exit syscalls, a freestanding user libc and a
+  bounded aligned bump allocator, retaining the lesson03/04 loading/runtime.
 
 The lessons have no interrupts, scheduler or filesystem. Lesson04 enforces
 instruction privilege but deliberately does **not** isolate memory: PMP allows
 all addresses and there are no page tables. See its specification and tests.
-Run `make lesson04` / `make test-lesson04` for the new experiment; full `make
-test` keeps all earlier regressions. Logs are under `build/lesson04/`.
+Run `make lesson04` / `make test-lesson04` or `make lesson05` /
+`make test-lesson05` for each new experiment; full `make test` keeps all earlier
+regressions. Guest logs are under `build/lesson04/` and `build/lesson05/`.
 
 ## Reproduce
 

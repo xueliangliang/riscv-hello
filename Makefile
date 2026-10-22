@@ -174,5 +174,54 @@ inspect-lesson04: build/lesson04/kernel.elf build/lesson04/user.elf
 
 inspect: inspect-lesson04
 
+build/lesson05:
+	mkdir -p $@
+
+build/lesson05/%.o: lessons/05/%.c lessons/05/libc.h lessons/05/abi.h lessons/04/runtime.h | build/lesson05
+	$(CC) $(PRIV_CFLAGS) -Ilessons/05 -c -o $@ $<
+
+build/lesson05/user-start.o: lessons/05/user-start.S | build/lesson05
+	$(CC) $(PRIV_CFLAGS) -c -o $@ $<
+
+build/lesson05/kernel.elf: $(PRIV_COMMON) build/lesson05/kernel.o lessons/03/kernel.ld
+	$(CC) $(PRIV_CFLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/03/kernel.ld -o $@ $(PRIV_COMMON) build/lesson05/kernel.o
+
+build/lesson05/user.elf: build/lesson05/user-start.o build/lesson05/user.o build/lesson05/libc.o lessons/04/user.ld
+	$(CC) $(PRIV_CFLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/04/user.ld -o $@ build/lesson05/user-start.o build/lesson05/user.o build/lesson05/libc.o
+
+build/lesson05/user-bad-exit.o: lessons/05/user.c lessons/05/libc.h lessons/05/abi.h | build/lesson05
+	$(CC) $(PRIV_CFLAGS) -Ilessons/05 -DBAD_EXIT -c -o $@ $<
+
+build/lesson05/user-bad-trap.o: lessons/05/user.c lessons/05/libc.h lessons/05/abi.h | build/lesson05
+	$(CC) $(PRIV_CFLAGS) -Ilessons/05 -DBAD_TRAP -c -o $@ $<
+
+build/lesson05/user-%.elf: build/lesson05/user-%.o build/lesson05/user-start.o build/lesson05/libc.o lessons/04/user.ld
+	$(CC) $(PRIV_CFLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/04/user.ld -o $@ build/lesson05/user-start.o $< build/lesson05/libc.o
+
+build/lesson05/%.bin: build/lesson05/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+
+build/lesson05/disk.img: build/lesson05/kernel.bin build/lesson05/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson05/user.bin $@
+
+build/lesson05/disk-%.img: build/lesson05/kernel.bin build/lesson05/user-%.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson05/user-$*.bin $@
+
+.PHONY: lesson05 test-lesson05 inspect-lesson05
+lesson05: build/lesson03/bootloader.elf build/lesson05/disk.img
+all: lesson05
+
+test-lesson05: lesson05 build/lesson05/disk-bad-exit.img build/lesson05/disk-bad-trap.img
+	QEMU="$(QEMU)" $(PYTHON) tests/run-privilege.py 05
+
+test: test-lesson05
+
+inspect-lesson05: build/lesson05/kernel.elf build/lesson05/user.elf
+	$(READELF) -h -lW build/lesson05/kernel.elf build/lesson05/user.elf
+	$(OBJDUMP) -d build/lesson05/kernel.elf build/lesson05/user.elf
+
+inspect: inspect-lesson05
+
 clean:
 	rm -rf build

@@ -82,9 +82,33 @@ def lesson04():
     print("PASS: lesson04 exact cause/PC/context and negative QEMU cases.")
 
 
+def lesson05():
+    prefix = BOOT + ["Lesson 05: supervisor ready for syscall ABI."]
+    body = [
+        "trap: scause=0x0000000000000008 sepc=0x000000008040001c SPP=0",
+        "user: hello via syscall.",
+        "user: write bounds and unknown syscall rejected.",
+        "user: libc, aligned heap, overflow and exhaustion verified.",
+        "user: exiting.",
+    ]
+    run("build/lesson05/disk.img", prefix + body + [
+        "PASS: user exit(0) recovered to supervisor.",
+    ], 0)
+    run("build/lesson05/disk-bad-exit.img", prefix + body + [
+        "FAIL: user exit status",
+    ], 1)
+    run("build/lesson05/disk-bad-trap.img", prefix + [
+        "trap: scause=0x0000000000000002 sepc=0x0000000080400030 SPP=0",
+        "FAIL: unexpected scause",
+    ], 1)
+    print("PASS: lesson05 ABI, write rejection, libc, heap and negative QEMU cases.")
+
+
 if __name__ == "__main__":
     test_oracle()
     if sys.argv[1:] == ["04"]:
         lesson04()
+    elif sys.argv[1:] == ["05"]:
+        lesson05()
     else:
-        raise SystemExit("usage: run-privilege.py 04")
+        raise SystemExit("usage: run-privilege.py 04|05")
