@@ -28,7 +28,10 @@ if ! grep -q 'LOAD.*0x0000000080000000' <<<"$segments"; then
 fi
 
 set +e
-output=$(timeout 10s "$qemu" \
+# This test only emits UART bytes. Keep timeout in the foreground process group
+# and detach serial input from the interactive terminal; otherwise QEMU can be
+# stopped by SIGTTIN when GNU timeout puts it in a background process group.
+output=$(timeout --foreground --kill-after=2s 10s "$qemu" \
     -machine virt \
     -smp 1 \
     -m 128M \
@@ -37,7 +40,7 @@ output=$(timeout 10s "$qemu" \
     -monitor none \
     -bios none \
     -kernel "$image" \
-    -no-reboot 2>&1)
+    -no-reboot </dev/null 2>&1)
 status=$?
 set -e
 
