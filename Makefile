@@ -121,5 +121,58 @@ test-lesson03: build/lesson03/bootloader.elf build/lesson03/disk.img build/lesso
 
 test: test-lesson01 test-lesson02 test-lesson03
 
+# Lessons 04+: reuse lesson03's unmodified bootloader and disk format.
+PRIV_CFLAGS := $(LESSON02_CFLAGS) -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/04
+PRIV_COMMON := build/lesson04/start.o build/lesson04/trap.o build/lesson04/runtime.o build/lesson02/uart.o
+
+build/lesson04:
+	mkdir -p $@
+
+build/lesson04/%.o: lessons/04/%.S | build/lesson04
+	$(CC) $(PRIV_CFLAGS) -c -o $@ $<
+
+build/lesson04/%.o: lessons/04/%.c lessons/04/runtime.h | build/lesson04
+	$(CC) $(PRIV_CFLAGS) -c -o $@ $<
+
+build/lesson04/kernel.elf: $(PRIV_COMMON) build/lesson04/kernel.o lessons/03/kernel.ld
+	$(CC) $(PRIV_CFLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/03/kernel.ld -o $@ $(PRIV_COMMON) build/lesson04/kernel.o
+
+build/lesson04/user.elf: build/lesson04/user.o lessons/04/user.ld
+	$(CC) $(PRIV_CFLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/04/user.ld -o $@ $<
+
+build/lesson04/user-bad-cause.o: lessons/04/user.S | build/lesson04
+	$(CC) $(PRIV_CFLAGS) -DBAD_CAUSE -c -o $@ $<
+
+build/lesson04/user-bad-pc.o: lessons/04/user.S | build/lesson04
+	$(CC) $(PRIV_CFLAGS) -DBAD_PC -c -o $@ $<
+
+build/lesson04/user-%.elf: build/lesson04/user-%.o lessons/04/user.ld
+	$(CC) $(PRIV_CFLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/04/user.ld -o $@ $<
+
+build/lesson04/%.bin: build/lesson04/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+
+build/lesson04/disk.img: build/lesson04/kernel.bin build/lesson04/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson04/user.bin $@
+
+build/lesson04/disk-%.img: build/lesson04/kernel.bin build/lesson04/user-%.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson04/user-$*.bin $@
+
+.PHONY: lesson04 test-lesson04 inspect-lesson04
+lesson04: build/lesson03/bootloader.elf build/lesson04/disk.img
+all: lesson04
+
+test-lesson04: lesson04 build/lesson04/disk-bad-cause.img build/lesson04/disk-bad-pc.img
+	QEMU="$(QEMU)" $(PYTHON) tests/run-privilege.py 04
+
+test: test-lesson04
+
+inspect-lesson04: build/lesson04/kernel.elf build/lesson04/user.elf
+	$(READELF) -h -lW build/lesson04/kernel.elf build/lesson04/user.elf
+	$(OBJDUMP) -d build/lesson04/kernel.elf build/lesson04/user.elf
+
+inspect: inspect-lesson04
+
 clean:
 	rm -rf build

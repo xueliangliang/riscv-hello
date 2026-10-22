@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The current `main` contains three experiments:
+The current `main` contains four experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -17,8 +17,15 @@ The current `main` contains three experiments:
   this is a loading demo, not an interactive shell. A malformed boot-record
   test checks the rejection path.
 
-These are still boot/bring-up exercises, not an operating system: there is no
-privilege transition, interrupt handling, scheduler, or filesystem.
+- [Lesson 04 — 从 M-mode 到 S-mode，再到 U-mode](lessons/04/README.md)
+  reuses that disk loader, enters S then U, and proves U origin with delegated
+  ecall/illegal-CSR traps, exact cause/PC checks and context restoration.
+
+The lessons have no interrupts, scheduler or filesystem. Lesson04 enforces
+instruction privilege but deliberately does **not** isolate memory: PMP allows
+all addresses and there are no page tables. See its specification and tests.
+Run `make lesson04` / `make test-lesson04` for the new experiment; full `make
+test` keeps all earlier regressions. Logs are under `build/lesson04/`.
 
 ## Reproduce
 
