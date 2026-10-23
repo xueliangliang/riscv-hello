@@ -106,6 +106,24 @@ def assert_write(text, size):
     assert f"\r\nfwrite target=0 result={size}\r\n10> " in text, "write return mismatch"
 
 
+def assert_rm(text, result=0):
+    assert f"\r\nrm target=0 result={result}\r\n10> " in text, "rm result mismatch"
+
+
+def listing_files(text):
+    """Name -> reported size parsed from one real `ls` transcript."""
+    found = {name: int(size, 16)
+             for name, size in re.findall(r"file: ([A-Za-z0-9_.-]+) size=0x([0-9a-f]{16})", text)}
+    assert found, ("missing listing lines", text[-500:])
+    return found
+
+
+def assert_listing(text, expected):
+    """Exact reported names and sizes, so a wrong size alone is caught."""
+    assert listing_files(text) == {name: len(content) for name, content in expected.items()}, \
+        "listing name/size mismatch"
+
+
 def fs_stats(text):
     match = re.search(r"fsinfo: reads=0x([0-9a-f]+) writes=0x([0-9a-f]+) flushes=0x([0-9a-f]+) healthy=0x([0-9a-f]+)", text)
     assert match, text
@@ -118,17 +136,20 @@ def raw_check(disk, expected, protected):
     files = decode(disk)
     assert set(files) == set(expected), (set(files), set(expected))
     for name, content in expected.items():
-        assert files[name]["size"] == len(content), (name, "logical size")
-        assert files[name]["content"] == content, (name, "raw exact bytes")
+        entry = files[name]
+        assert entry["size"] == len(content), (name, "logical size")
+        assert entry["content"] == content, (name, "raw exact bytes")
+        # Every successful write zero-pads its whole 4096-byte extent, so the
+        # bytes between logical size and extent end must be zero for ALL files.
+        start = entry["lba"] * 512 + entry["size"]
+        tail = raw[start:(entry["lba"] + 8) * 512]
+        assert len(tail) == 4096 - len(content), (name, "extent tail length")
+        assert not any(tail), (name, "padding beyond logical size not zero")
     # Slot0 rewrite to three bytes must not expose any old suffix on disk.
     if "gamma" in files:
         assert files["gamma"]["slot"] == 1, "deleted middle slot not reused"
     if "reused" in files:
         assert files["reused"]["slot"] == 6, "deleted extent not reused"
-    if "alpha" in files:
-        entry = files["alpha"]
-        tail = raw[entry["lba"] * 512 + entry["size"]:(entry["lba"] + 8) * 512]
-        assert not any(tail), "replacement padding not zero"
     return report(files)
 
 
@@ -143,6 +164,7 @@ def negative(name, disk, options=None):
     finally:
         g.close()
     assert hashlib.sha256(Path(disk).read_bytes()).hexdigest() == before, name
+    return bytes(g.all)
 
 
 def scenario(directory):
@@ -190,14 +212,15 @@ def scenario(directory):
         transcripts["short"] = g.cmd("cat alpha")
         assert_cat(transcripts["short"], b"xyz")
         g.cmd("cat no-such-file", "cat target=0 result=-10")
-        g.cmd("rm beta", "rm target=0 result=0")
+        removed = g.cmd("rm beta", "rm target=0 result=0")
+        assert_rm(removed)
         del expected["beta"]
         g.cmd("cat beta", "cat target=0 result=-10")
         g.cmd("fwrite gamma replacement", "fwrite target=0 result=11")
         expected["gamma"] = b"replacement"
         g.cmd("ls", "file: alpha size=0x0000000000000003")
         listing = g.cmd("ls")
-        assert "file: gamma size=0x000000000000000b" in listing and "file: beta " not in listing
+        assert_listing(listing, expected)
         stats = fs_stats(g.cmd("fsinfo"))
         assert stats[0] >= 3 and stats[1] > 0 and stats[2] > 0 and stats[3] == 1
         g.shutdown()
@@ -263,8 +286,11 @@ def scenario(directory):
     rejects(lambda: assert_cat(transcripts["short"].replace("result=0", "result=-14"), b"xyz"))
     rejects(lambda: assert_cat(transcripts["cold"].replace("replacement", "replacemenX"), b"replacement"))
     rejects(lambda: assert_write(result.replace("result=3", "result=2"), 3))
+    # Only the reported size text changes; the transcript is otherwise the real one.
+    rejects(lambda: assert_listing(listing.replace("size=0x0000000000000003", "size=0x0000000000000004"), expected))
+    rejects(lambda: assert_rm(removed.replace("result=0", "result=-14")))
     rejects(lambda: raw_check(disk, dict(expected, alpha=b"bad"), protected))
-    Path("build/lesson10/oracle-mutations.log").write_text("PASS: exact-content/status/EOF/cross-boot/write-count/raw-content mutations rejected\n")
+    Path("build/lesson10/oracle-mutations.log").write_text("PASS: exact-content/status/EOF/listing-size/rm-status/cross-boot/write-count/raw-content mutations rejected\n")
     # Keep only disposable snapshots as evidence; fixture and live state are untouched.
     shutil.copyfile(disk, "build/lesson10/evidence-shell.img")
     shutil.copyfile(patterns_disk, "build/lesson10/evidence-patterns.img")
@@ -339,7 +365,12 @@ def io_errors(directory):
         config.write_text(text)
         opts = command(f"blkdebug:{config}:{disk}", device_extra=",werror=report,rerror=report")
         if kind == "read":
-            negative("io-read", disk, opts)
+            log = negative("io-read", disk, opts)
+            # Mount rejection alone is not enough: the driver must have seen
+            # the device's actual IOERR status byte on the type0 READ request.
+            failure = re.search(rb"block: fail-closed code=0x[0-9a-f]{16} "
+                                rb"request-type=0x0000000000000000 status=0x0000000000000001", log)
+            assert failure, log[-2000:]
             continue
         g = Guest(f"io-error-{kind}.log", str(disk), True, opts)
         try:

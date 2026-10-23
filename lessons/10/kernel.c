@@ -304,10 +304,14 @@ static long file_syscall(long number, unsigned long first, unsigned long second,
     if (number == FS_CLOSE) {
         return fs_close(first);
     }
-    if (number == FS_LIST) {
-        return fs_list();
-    }
-    if (number == FS_INFO) {
+    if (number == FS_LIST || number == FS_INFO) {
+        /* Reserved zero arguments are strict here too: reject before output. */
+        if (second != 0 || third != 0) {
+            return E_ARG;
+        }
+        if (number == FS_LIST) {
+            return fs_list();
+        }
         fs_info();
         return 0;
     }

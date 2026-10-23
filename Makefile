@@ -512,6 +512,8 @@ inspect-lesson10: build/lesson10/bootloader.elf build/lesson10/kernel.elf build/
 inspect: inspect-lesson10
 
 .PHONY: test-lesson10-gdb
+# Truncate before the runner regression, so a failure in either step is visible.
 test-lesson10-gdb: lesson10
+	$(PYTHON) lessons/10/fresh-log.py build/lesson10/gdb-flush.log
 	$(PYTHON) lessons/10/gdb-runner-test.py
 	QEMU="$(QEMU)" $(PYTHON) lessons/10/gdb-test.py

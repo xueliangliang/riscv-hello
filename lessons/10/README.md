@@ -105,19 +105,23 @@ The suite checks:
 - U syscall patterns of **511/512/513/1024/4096** bytes, repeated unaligned
   257-byte reads, transient 4096-byte NUL/high-bit binary pattern, logical EOF and untouched EOF output, empty files,
   directory/handle exhaustion, bad/stale tokens, busy files, 31/32-byte and
-  unsafe names, null/wrapped pointers, invalid mode and 4097-byte rejection;
+  unsafe names, null/wrapped pointers, invalid mode, reserved remove/list/info
+  arguments and 4097-byte rejection;
 - three independent QEMU processes on the same writable shell disk and two
   on a pattern disk, exact named reads after reboot, no re-seeding;
 - a separately implemented Python decoder of raw header/records/payload,
-  exact logical sizes/content, zero unused records, per-slot offsets,
-  replacement padding and unchanged **all LBA0–256** protected boot bytes;
+  exact logical sizes/content, zero unused records, per-slot offsets, zero
+  padding from **every** file's logical size to the end of its 4096-byte
+  extent, and unchanged **all LBA0–256** protected boot bytes;
 - malformed header/used/name/padding/reserved/size/offset/duplicate records,
   real readonly feature rejection, labeled missing-FLUSH feature injection;
 - actual QEMU **blkdebug EIO** on metadata READ, payload WRITE and FLUSH,
+  including the driver-visible `request-type`/`status` line for the READ,
   sticky poison and failure rather than a successful shutdown;
 - real IRQ wake from idle, run/sleep/wait and existing editor semantics;
 - mutation checks rejecting lies in captured successful content, EOF,
-  returned write count/status, cross-boot content and raw-image expectations;
+  listing name/size, returned write and rm count/status, cross-boot content
+  and raw-image expectations;
 - launcher one-time install, host-lock exclusion, alternate-disk persistence,
   explicit reset, and refusal to overwrite an existing malformed image.
 
@@ -138,11 +142,19 @@ Key evidence under `build/lesson10/`:
 python3 lessons/10/decode.py build/lesson10/evidence-patterns.img
 ```
 
-The GDB gate first runs real-child logging regressions (success, nonzero,
-timeout, early guest assertion and launch failure). Each run truncates
-`gdb-flush.log` before launch or guest waits; failures retain partial combined
-stdout/stderr, append a failure diagnostic, kill/drain/reap any debugger, and
-still fail the gate. A previous run's PASS is never reused.
+`make test-lesson10-gdb` runs real-child logging regressions (success,
+nonzero, timeout, early guest assertion and launch failure). Its first recipe
+command truncates `build/lesson10/gdb-flush.log` through
+`lessons/10/fresh-log.py` — before the runner regression step and before any
+launch or guest wait — and `gdb-test.py` repeats that truncation idempotently
+for direct invocations. A failure in either step therefore never leaves a
+previous run's PASS behind; e.g.
+`TMPDIR=/nonexistent/definitely-not-here make test-lesson10-gdb` fails in the
+runner regression and the log is empty, containing no PASS. The runner
+regressions also assert that the helper clears a file containing a fake PASS
+and reports a truncation error. Failures retain partial combined stdout/stderr,
+append a failure diagnostic, kill/drain/reap any debugger, and still fail the
+gate.
 
 The optional GDB gate stops at `block_completion_observed` after validation,
 asserts type4, a 16-byte header→one-byte status with no data descriptor,

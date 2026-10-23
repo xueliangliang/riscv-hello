@@ -71,13 +71,27 @@ static void boundary_names(unsigned long end)
     require(remove == F_ARG, "FAIL crossing remove name\n");
     verify("x", 513);
 }
-static void name_arguments(void)
+static void reserved_arguments(void)
 {
-    /* Rejected open/remove must neither truncate nor delete the raw-checked
-       b511 fixture. FS_REMOVE has a reserved zero argument, not an open mode. */
-    require(open_file("b511", 2) == F_ARG, "FAIL invalid replace mode\n");
+    /* Reserved zero arguments are strict for remove, list and info alike:
+       a nonzero value fails with -4 before output or mutation. */
     require(syscall2(FS_REMOVE, (unsigned long)"b511", 1) == F_ARG,
             "FAIL remove reserved argument\n");
+    require(syscall2(FS_LIST, 0, 1) == F_ARG, "FAIL list reserved a1\n");
+    require(syscall3(FS_LIST, 0, 0, 1) == F_ARG, "FAIL list reserved a2\n");
+    require(syscall2(FS_INFO, 0, 1) == F_ARG, "FAIL info reserved a1\n");
+    require(syscall3(FS_INFO, 0, 0, 1) == F_ARG, "FAIL info reserved a2\n");
+    /* Rejected calls must leave both operations usable and the file intact. */
+    require(syscall2(FS_LIST, 0, 0) == 0, "FAIL listing after rejection\n");
+    require(syscall2(FS_INFO, 0, 0) == 0, "FAIL info after rejection\n");
+    verify("b511", 511);
+    say("fstest: reserved remove/list/info arguments PASS\n");
+}
+static void name_arguments(void)
+{
+    /* Rejected open must neither truncate nor delete the raw-checked fixture.
+       Reserved argument strictness is covered by reserved_arguments(). */
+    require(open_file("b511", 2) == F_ARG, "FAIL invalid replace mode\n");
     verify("b511", 511);
     char unterminated[32];
     for (unsigned i = 0; i < sizeof(unterminated); i++) {
@@ -100,7 +114,7 @@ static void name_arguments(void)
     boundary_names(DATA_BASE + DATA_SIZE);
     boundary_names(STACK_BASE + STACK_SIZE);
     require(file_remove("x") == 0, "FAIL boundary cleanup\n");
-    say("fstest: name regions and reserved remove argument PASS\n");
+    say("fstest: name regions PASS\n");
 }
 void file_test(int checking)
 {
@@ -121,6 +135,7 @@ void file_test(int checking)
             verify(names[i], sizes[i]);
         }
         name_arguments();
+        reserved_arguments();
         create("short", 513);
         create("short", 3);
         verify("short", 3);

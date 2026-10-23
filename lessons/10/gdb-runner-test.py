@@ -15,6 +15,21 @@ spec.loader.exec_module(gate)
 
 with tempfile.TemporaryDirectory(prefix="lesson10-runner-", dir=os.environ.get("TMPDIR")) as directory:
     directory = Path(directory)
+
+    # The make target truncates the real gate log before this regression can
+    # fail; that helper alone must clear a stale PASS and report its own errors.
+    helper = Path(__file__).with_name("fresh-log.py")
+    stale = directory / "stale.log"
+    stale.write_bytes(b"PASS GDB: actual FLUSH type4 header16 -> status1\n")
+    finished = subprocess.run([sys.executable, str(helper), str(stale)],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert finished.returncode == 0, finished.stdout
+    assert stale.read_bytes() == b"", "fresh-log kept a stale PASS"
+    absent = directory / "no-such-directory" / "gate.log"
+    finished = subprocess.run([sys.executable, str(helper), str(absent)],
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert finished.returncode != 0 and b"fresh-log: cannot truncate" in finished.stdout, finished.stdout
+
     log = directory / "debugger.log"
     for status in (0, 7):
         log.write_bytes(b"STALE PASS GDB\n")
@@ -108,4 +123,4 @@ with tempfile.TemporaryDirectory(prefix="lesson10-runner-", dir=os.environ.get("
     assert b"FAIL GDB gate: FileNotFoundError" in log.read_bytes()
     assert b"early stdout" not in log.read_bytes()
 
-print("PASS lesson10 debugger runner: success/nonzero, timeout, early guest failure, launch failure; fresh logs and reaped children")
+print("PASS lesson10 debugger runner: stale-PASS truncation helper, success/nonzero, timeout, early guest failure, launch failure; fresh logs and reaped children")

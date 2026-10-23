@@ -55,7 +55,8 @@ class DebuggerSession:
 
 
 def main():
-    # Truncate before fixture lookup, launch, or any guest wait can fail.
+    # The make target already truncated via fresh-log.py; this second,
+    # idempotent truncation also covers direct invocations.
     with DebuggerSession("build/lesson10/gdb-flush.log") as debugger:
         base = Path("build/lesson10/disk.img")
         before = hashlib.sha256(base.read_bytes()).hexdigest()

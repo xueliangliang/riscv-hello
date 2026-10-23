@@ -85,6 +85,10 @@ allowed; opening/replacing or deleting an open file returns busy.
 | 23 | list | 0, 0 | 0, listing on console; I/O error if poisoned |
 | 24 | info | 0, 0 | 0, diagnostic completed-request counts and health |
 
+Second and third arguments documented as `0` are **reserved**: nonzero values
+fail with `-4` before any console output, device request or metadata mutation
+(remove, list and info alike).
+
 Open mode **0** reads an existing file only, never creates; **1** explicitly
 creates or replaces (immediately truncating to empty), grants writes, and
 persists the empty metadata before returning. Other modes fail. Each write
