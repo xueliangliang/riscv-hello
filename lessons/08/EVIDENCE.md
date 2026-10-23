@@ -61,6 +61,45 @@ proper parent WAITING/immediate path → exact return/reap ordering. Mutants are
 recorded in `oracle-mutations.log`; deleting all wait-block or all wait-call
 records is rejected, as are wrong-target/status and missing-kill-completion logs.
 
+## Pre-tag GDB flake correction
+
+The original gate was reproduced timing out on hart0; a captured partial log
+stopped after installing `tbreak *restore_user_return thread 1`. A diagnostic
+run with real GDB remote logging and SIGINT after the unchanged 30-second limit
+showed:
+
+- GDB inserted the shared `sret` breakpoint (`Z0,8020117c,4`).
+- The **other** hart reported the stop (`T05thread:p01.02`). The thread filter
+  hid it, but GDB removed that breakpoint and inserted a software-step target
+  at `sret+4` (`Z0,80201180,2`).
+- It resumed only that non-target hart (`vCont;c:p1.2`). On interruption hart1
+  was executing the user spinner at `0x80400034`; hart0 was still paused at
+  `0x80201164` inside its restore epilogue. `scheduler_owner` was **-1**.
+
+This is a debugger-induced scheduling hang, not evidence of a kernel lock
+failure. A thread-specific software breakpoint alone does not prevent the
+other CPU hitting the same instruction. The fix enables scheduler locking
+only after the selected timer frame reached unlocked `restore_frame`, until
+its straight-line epilogue reaches `sret`. Detach resumes both CPUs afterward.
+All actual restoration, timer, ownership and complete-guest assertions remain
+unchanged; no runtime source or lesson01–07 file changed.
+
+After the fix, **10 consecutive both-hart GDB gates (20 fresh disk boots)**
+returned zero, each including full guest completion after detach. The normal
+`make test-lesson08` suite also returned zero (five SMP boots, PTY, both broken
+variants, timeout rejection and strict oracle mutants). Captured local logs
+are `lesson08-fixed-0.log`–`lesson08-fixed-9.log`,
+`lesson08-fixed-results.json`, and `lesson08-fixed-normal.log` in the task
+scratch directory. The failing diagnostic is `lesson08-diag-9.out` /
+`lesson08-diag-9.rsp`; the earlier partial timeout is
+`lesson08-remote-3-0.partial`. These are execution evidence, not golden files.
+
+The runner now preserves and prints partial combined GDB output on timeout,
+correctly decoding the bytes that `TimeoutExpired.stdout` can contain even
+with `text=True`. `python3 lessons/08/gdb-runner-test.py` exercises real child
+success, nonzero exit, and timeout logging. The GDB timeout remains 30 seconds;
+there are no automatic retries or relaxed assertions.
+
 ## Layout inspected
 
 The gate's linked symbols place M stacks at `0x80203000`, S stacks at

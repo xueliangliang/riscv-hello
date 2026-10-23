@@ -228,13 +228,24 @@ stack metadata、M stack、PMP/Sstc/delegation 和本地 deadline。随后 detac
 hart 一起继续，完整 guest oracle 仍须通过。日志为 `gdb-hart0.log` /
 `gdb-hart1.log` 及对应 `gdb-hart*-uart.log`。
 
-两个容易把 debugger 问题当成 scheduler 问题的细节：
+三个容易把 debugger 问题当成 scheduler 问题的细节：
 
 1. 先在 kernel entry 用硬件断点等待 **磁盘加载完成**，再刷新 GDB memory cache
    并设需要解码指令的断点；在尚为零的目标内存上解码会认错 instruction size。
-2. 不对 `sret` 反复自动 step-over。GDB 的 software step 可能选择 pc+4 并只恢复
-   一个 CPU，错过真正的 sepc，最后卡在另一个已暂停 hart 持有的锁上。脚本先在
-   普通 `mv` 上筛选目标 frame，再用一次性 thread-specific sret 断点检查并 detach。
+2. thread-specific 软件断点仍插在**两个 CPU** 的共同地址。若另一 hart 先到
+   `sret`，GDB 虽不会把它报告为目标命中，却会自动只运行那个 CPU、试图单步到
+   `pc+4`；`sret` 实际跳到 sepc，目标 hart 则被一直暂停在 epilogue 中。重现时
+   remote protocol 确认了这一点；这甚至不要求全局锁被占用。
+3. 脚本先在普通 `mv` 上筛选 timer frame，再删除筛选断点，**仅在已解锁、无锁
+   获取的直线恢复 epilogue 内开启 `scheduler-locking on`**，随后用一次性
+   thread-specific sret 断点检查。这样另一 hart 不会误撞该 sret 断点。不要在
+   trap_dispatch/idle/持锁路径上照搬单 hart 执行。最后 detach 恢复两个 CPU，
+   完整 guest oracle 仍必须成功；不是跳过 timer 或恢复断言。
+
+GDB 仍保留30秒失败上界，不重试、不延长。若超时，runner 把
+`TimeoutExpired.stdout`（即便 `text=True` 也可能是 bytes）解码后写到同一
+`gdb-hartN.log` 并打印；对应 UART 日志保留。runner 自身的真实 subprocess
+成功/非零退出/超时回归可运行 `python3 lessons/08/gdb-runner-test.py`。
 
 本 hart 解锁不代表 GDB 停下时**全局锁值必须为0**：另一个 hart 可以已经获锁。
 所以检查的是 `scheduler_owner != 当前 hart`。本 QEMU 的 GDB register XML 没有
