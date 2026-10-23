@@ -417,3 +417,49 @@ build/lesson08/disk-bad-lock.img: build/lesson08/kernel-bad-lock.bin build/lesso
 .PHONY: test-lesson08-gdb
 test-lesson08-gdb: lesson08
 	$(PYTHON) lessons/08/gdb-test.py
+
+.PHONY: test-lesson09-gdb
+test-lesson09-gdb: lesson09
+	QEMU="$(QEMU)" $(PYTHON) lessons/09/gdb-test.py
+
+# Lesson09: own disk-boot runtime and interactive payload.
+CONSOLE_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/09 -Ibuild/lesson09
+CONSOLE_COMMON := build/lesson09/start.o build/lesson09/runtime.o build/lesson09/trap.o build/lesson02/uart.o
+build/lesson09:
+	mkdir -p $@
+build/lesson09/%.o: lessons/09/%.S | build/lesson09
+	$(CC) $(CONSOLE_FLAGS) -c -o $@ $<
+build/lesson09/%.o: lessons/09/%.c lessons/09/abi.h lessons/09/process.h lessons/09/runtime.h lessons/09/syscall.h | build/lesson09
+	$(CC) $(CONSOLE_FLAGS) -c -o $@ $<
+build/lesson09/user.elf: build/lesson09/user-start.o build/lesson09/user.o build/lesson09/syscall.o lessons/09/user.ld
+	$(CC) $(CONSOLE_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/09/user.ld -o $@ $(filter %.o,$^)
+build/lesson09/user-symbols.h: build/lesson09/user.elf lessons/09/symbols.py
+	$(PYTHON) lessons/09/symbols.py $(CROSS_COMPILE)nm $< $@
+build/lesson09/kernel.o: build/lesson09/user-symbols.h
+build/lesson09/kernel.elf: $(CONSOLE_COMMON) build/lesson09/kernel.o lessons/09/kernel.ld
+	$(CC) $(CONSOLE_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/09/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson09/kernel-bad-irq.o: lessons/09/kernel.c build/lesson09/user-symbols.h | build/lesson09
+	$(CC) $(CONSOLE_FLAGS) -DBAD_IRQ -c -o $@ $<
+build/lesson09/kernel-bad-irq.elf: $(CONSOLE_COMMON) build/lesson09/kernel-bad-irq.o lessons/09/kernel.ld
+	$(CC) $(CONSOLE_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/09/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson09/bootloader.elf: build/lesson09/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(CONSOLE_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+build/lesson09/%.bin: build/lesson09/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+build/lesson09/disk.img: build/lesson09/kernel.bin build/lesson09/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson09/user.bin $@
+build/lesson09/disk-bad-irq.img: build/lesson09/kernel-bad-irq.bin build/lesson09/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson09/user.bin $@
+.PHONY: lesson09 test-lesson09 inspect-lesson09 run-lesson09
+lesson09: build/lesson09/bootloader.elf build/lesson09/disk.img
+all: lesson09
+test-lesson09: lesson09 build/lesson09/disk-bad-irq.img
+	QEMU="$(QEMU)" $(PYTHON) lessons/09/test.py
+test: test-lesson09
+inspect-lesson09: build/lesson09/bootloader.elf build/lesson09/kernel.elf build/lesson09/user.elf
+	$(READELF) -h -lW $^
+	$(OBJDUMP) -d $^
+inspect: inspect-lesson09
+run-lesson09: lesson09
+	$(PYTHON) lessons/09/run.py

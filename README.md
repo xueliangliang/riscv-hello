@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The current `main` contains eight experiments:
+The cumulative repository contains nine experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -40,7 +40,13 @@ The current `main` contains eight experiments:
   remote RUNNING kill. Real U workers on both harts contend on a shared lock
   and verify an exact 8000-update counter; broken locking/restoration fail.
 
-Lessons01–07 remain unchanged. There is still no filesystem or address-space
+- [Lesson 09 — Interactive U shell and interrupt-driven serial input](lessons/09/README.md)
+  retains dual-hart disk boot, routes UART RX through hart0's S PLIC context,
+  blocks reads atomically with IRQ wakeup, and uses genuine U idle contexts
+  so delayed input arrives even when every application is blocked. Includes
+  cursor/history editing, concurrent builtins and exact owned wait/reap tests.
+
+Lessons01–08 remain unchanged. There is still no filesystem or address-space
 isolation: PMP grants flat physical access and there are no page tables.
 Lesson07 owns its scheduler/runtime and keeps lesson03's real disk boot chain.
 Run `make lesson07` / `make test-lesson07`; optional `make test-lesson07-gdb`
@@ -49,7 +55,12 @@ See the chapter README for ABI, scope, direct QEMU commands and log oracles.
 Run `make lesson04` / `make test-lesson04`, `make lesson05` /
 `make test-lesson05`, or `make lesson06` / `make test-lesson06` for earlier steps;
 full `make test` keeps all earlier regressions. Guest logs are under
-`build/lesson04/` through `build/lesson08/`.
+`build/lesson04/` through `build/lesson09/`.
+Run `make run-lesson09` for the persistent shell; only `shutdown` exits it.
+`make test-lesson09` drives real serial PTY commands, cursor/history/Tab edits,
+owned wait/reap, slot exhaustion and RX overflow recovery. Optional
+`make test-lesson09-gdb` checks an idle-origin UART IRQ through reader wakeup
+and actual U register restoration, then executes the rest of that input line.
 Run `make lesson08` / `make test-lesson08`; optional `make test-lesson08-gdb`
 checks actual timer-frame restoration separately on both harts. Lesson08's
 persistent lock-aware idle polls with SIE disabled; it is not an interactive
