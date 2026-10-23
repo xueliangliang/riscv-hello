@@ -285,3 +285,62 @@ inspect-lesson06: build/lesson06/kernel.elf build/lesson06/user.elf
 	$(OBJDUMP) -d build/lesson06/kernel.elf build/lesson06/user.elf
 
 inspect: inspect-lesson06
+
+# Lesson07 owns all scheduling/runtime files; lesson03 remains the only -kernel.
+SCHED_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/07 -Ibuild/lesson07
+SCHED_COMMON := build/lesson07/start.o build/lesson07/runtime.o build/lesson07/kernel.o build/lesson02/uart.o
+
+build/lesson07:
+	mkdir -p $@
+
+build/lesson07/%.o: lessons/07/%.S | build/lesson07
+	$(CC) $(SCHED_FLAGS) -c -o $@ $<
+
+build/lesson07/%.o: lessons/07/%.c lessons/07/abi.h lessons/07/runtime.h lessons/07/process.h lessons/07/syscall.h | build/lesson07
+	$(CC) $(SCHED_FLAGS) -c -o $@ $<
+
+build/lesson07/user.elf: build/lesson07/user-start.o build/lesson07/user.o build/lesson07/workers.o build/lesson07/syscall.o lessons/07/user.ld
+	$(CC) $(SCHED_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/07/user.ld -o $@ $(filter %.o,$^)
+
+build/lesson07/user-symbols.h: build/lesson07/user.elf lessons/07/symbols.py
+	$(PYTHON) lessons/07/symbols.py $(CROSS_COMPILE)nm $< $@
+
+build/lesson07/kernel.o: build/lesson07/user-symbols.h
+
+build/lesson07/kernel.elf: $(SCHED_COMMON) build/lesson07/trap.o lessons/03/kernel.ld
+	$(CC) $(SCHED_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/03/kernel.ld -o $@ $(filter %.o,$^)
+
+build/lesson07/trap-bad-context.o: lessons/07/trap.S | build/lesson07
+	$(CC) $(SCHED_FLAGS) -DBAD_CONTEXT -c -o $@ $<
+
+build/lesson07/kernel-bad-context.elf: $(SCHED_COMMON) build/lesson07/trap-bad-context.o lessons/03/kernel.ld
+	$(CC) $(SCHED_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/03/kernel.ld -o $@ $(filter %.o,$^)
+
+build/lesson07/%.bin: build/lesson07/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+
+build/lesson07/disk.img: build/lesson07/kernel.bin build/lesson07/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson07/user.bin $@
+
+build/lesson07/disk-bad-context.img: build/lesson07/kernel-bad-context.bin build/lesson07/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson07/user.bin $@
+
+.PHONY: lesson07 test-lesson07 inspect-lesson07
+lesson07: build/lesson03/bootloader.elf build/lesson07/disk.img
+all: lesson07
+
+test-lesson07: lesson07 build/lesson07/disk-bad-context.img
+	QEMU="$(QEMU)" NM="$(CROSS_COMPILE)nm" OBJDUMP="$(OBJDUMP)" $(PYTHON) lessons/07/test.py
+
+test: test-lesson07
+
+inspect-lesson07: build/lesson07/kernel.elf build/lesson07/user.elf
+	$(READELF) -h -lW build/lesson07/kernel.elf build/lesson07/user.elf
+	$(OBJDUMP) -d build/lesson07/kernel.elf build/lesson07/user.elf
+
+inspect: inspect-lesson07
+
+.PHONY: test-lesson07-gdb
+test-lesson07-gdb: lesson07
+	$(PYTHON) lessons/07/gdb-test.py

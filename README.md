@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The current `main` contains six experiments:
+The current `main` contains seven experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -29,15 +29,22 @@ The current `main` contains six experiments:
   during ordinary U instructions, exact integer-context/PC restoration and
   user self-checks. This is **not** scheduling or a task switch.
 
-The lessons have no scheduler or filesystem. Lessons01–05 remain unchanged;
-lesson06 owns its interrupt-enabled entry and epilogue. Lesson04 enforces
-instruction privilege but deliberately does **not** isolate memory: PMP allows
-all addresses and there are no page tables. See its specification and tests.
+- [Lesson 07 — 保存 A 的现场，恢复 B：抢占式调度与进程生命周期](lessons/07/README.md)
+  adds timer-preemptive round-robin user contexts, independent stacks/data blocks,
+  blocking sleep and spawn/exit/kill/wait/reap/relaunch. A real U-mode controller
+  tests eight-slot exhaustion, unreaped zombies, ownership and generation PIDs.
+
+Lessons01–06 remain unchanged. There is still no filesystem or address-space
+isolation: PMP grants flat physical access and there are no page tables.
+Lesson07 owns its scheduler/runtime and keeps lesson03's real disk boot chain.
+Run `make lesson07` / `make test-lesson07`; optional `make test-lesson07-gdb`
+checks A's timer trap through restoration of B's actual SP/sepc before `sret`.
+See the chapter README for ABI, scope, direct QEMU commands and log oracles.
 Run `make lesson04` / `make test-lesson04`, `make lesson05` /
-`make test-lesson05`, or `make lesson06` / `make test-lesson06`;
+`make test-lesson05`, or `make lesson06` / `make test-lesson06` for earlier steps;
 full `make test` keeps all earlier regressions. Guest logs are under
-`build/lesson04/`, `build/lesson05/` and `build/lesson06/`.
-Lesson06 explicitly uses QEMU `-cpu rv64,sstc=true`; it does not use OpenSBI,
+`build/lesson04/` through `build/lesson07/`.
+Lessons06–07 explicitly use QEMU `-cpu rv64,sstc=true`; they do not use OpenSBI,
 an M-mode timer relay, PLIC timer interrupts or cooperative yielding.
 
 ## Reproduce
