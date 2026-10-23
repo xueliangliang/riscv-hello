@@ -14,7 +14,7 @@ assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
-with tempfile.TemporaryDirectory(dir=os.environ["TMPDIR"]) as directory:
+with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as directory:
     log = Path(directory) / "debugger.log"
     for status in (0, 1):
         output = io.StringIO()

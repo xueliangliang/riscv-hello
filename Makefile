@@ -416,4 +416,5 @@ build/lesson08/disk-bad-lock.img: build/lesson08/kernel-bad-lock.bin build/lesso
 
 .PHONY: test-lesson08-gdb
 test-lesson08-gdb: lesson08
+	$(PYTHON) lessons/08/gdb-runner-test.py
 	$(PYTHON) lessons/08/gdb-test.py
