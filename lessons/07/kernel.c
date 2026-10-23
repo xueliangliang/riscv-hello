@@ -247,6 +247,8 @@ static long syscall(struct Process *process, int *reschedule)
             terminate(child, 137);
             return 0;
         }
+        /* Valid WAIT only: record the target before either completion path. */
+        event("wait-call", process->pid, child->pid);
         if (child->state == ZOMBIE) {
             long status = child->status;
             reap(child);

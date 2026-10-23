@@ -25,7 +25,7 @@ CHECKS = [
     "check: live and zombie exhaustion",
     "check: reap relaunch complete",
 ]
-EVENT = re.compile(r"(spawn|zombie|reap|sleep|wake|kill|wait-block|wait-return|timer-switch) "
+EVENT = re.compile(r"(spawn|zombie|reap|sleep|wake|kill|wait-call|wait-block|wait-return|timer-switch) "
                    r"pid=0x([0-9a-f]{16}) value=0x([0-9a-f]{16})")
 PREEMPT = re.compile(r"preempt-loop pc=0x([0-9a-f]{16}) "
                      r"pid=0x([0-9a-f]{16}) value=0x([0-9a-f]{16})")
@@ -124,19 +124,28 @@ def check(result, bounds):
     hits = {}
     entries = {}
     killed = set()
-    statuses = []
+    statuses = {}
     reaped = []
     wait_statuses = []
     waiting = None
+    wait_phase = None
+    wait_paths = set()
     switches = []
     high_water = 0
     owner_exits = 0
     for line in lines[4:]:
         match = EVENT.fullmatch(line)
+        # These steps occur in one masked kernel handler, without interleaving.
+        required = {"block": "wait-block", "reap-immediate": "reap",
+                    "return-immediate": "wait-return", "return-blocked": "wait-return",
+                    "reap-blocked": "reap"}.get(wait_phase or "")
+        if required:
+            assert match and match[1] == required, (wait_phase, line)
         if match:
             name = match[1]
             pid, value = int(match[2], 16), int(match[3], 16)
             if name == "spawn":
+                assert not live or live.get(16) == "live", "blocked parent spawned"
                 slot = pid & 15
                 generation = pid >> 4
                 assert 0 <= slot < 8
@@ -147,41 +156,71 @@ def check(result, bounds):
                 entries[pid] = value
                 high_water = max(high_water, len(live))
             elif name == "zombie":
-                assert live[pid] in ("live", "sleep")
+                assert live.get(pid) in ("live", "sleep")
                 live[pid] = "zombie"
-                statuses.append((pid, value))
+                assert pid not in statuses
+                statuses[pid] = value
+                if waiting == pid:
+                    assert wait_phase == "blocked" and live[16] == "waiting"
+                    wait_phase = "return-blocked"
                 if entries[pid] == 4:
                     owner_exits += 1
                     assert value == 31
             elif name == "reap":
-                assert live[pid] == "zombie"
-                assert (pid, value) in statuses
+                assert live.get(pid) == "zombie"
+                assert pid == waiting and statuses[pid] == value, "reap target/status"
+                assert wait_phase in ("reap-immediate", "reap-blocked"), "premature reap"
+                assert live[16] == "live"
                 reaped.append((pid, value))
                 del live[pid]
+                if wait_phase == "reap-immediate":
+                    wait_phase = "return-immediate"
+                else:
+                    waiting = wait_phase = None
             elif name == "sleep":
-                assert live[pid] == "live"
+                assert live.get(pid) == "live"
                 live[pid] = "sleep"
             elif name == "wake":
-                assert live[pid] == "sleep" and pid not in killed
+                assert live.get(pid) == "sleep" and pid not in killed
                 live[pid] = "live"
             elif name == "kill":
+                assert live[16] == "live", "blocked parent killed"
                 assert pid not in killed
-                assert live[pid] in ("live", "sleep")
+                assert live.get(pid) in ("live", "sleep")
                 assert value == (3 if live[pid] == "sleep" else 1)
                 killed.add(pid)
-            elif name == "wait-block":
-                assert pid == 16 and value in live and live[value] != "zombie"
-                assert waiting is None
+            elif name == "wait-call":
+                # Only controller spawning is allowed by the independent ABI.
+                assert pid == 16 and live[pid] == "live"
+                assert waiting is None and value != pid and value in live
+                assert live[value] in ("live", "sleep", "zombie")
                 waiting = value
+                if live[value] == "zombie":
+                    wait_paths.add("immediate")
+                    wait_phase = "reap-immediate"
+                else:
+                    wait_paths.add("blocked")
+                    wait_phase = "block"
+            elif name == "wait-block":
+                assert pid == 16 and value == waiting and wait_phase == "block"
+                assert live.get(pid) == "live" and live[value] in ("live", "sleep")
+                live[pid] = "waiting"
+                wait_phase = "blocked"
             elif name == "wait-return":
-                assert pid == 16
+                assert pid == 16 and waiting is not None
+                assert wait_phase in ("return-immediate", "return-blocked")
+                assert statuses[waiting] == value, "wait returned another child's status"
                 wait_statuses.append(value)
-                if waiting is not None:
-                    assert (waiting, value) in statuses
-                    waiting = None
+                if wait_phase == "return-blocked":
+                    assert live.get(pid) == "waiting" and live[waiting] == "zombie"
+                    live[pid] = "live"
+                    wait_phase = "reap-blocked"
+                else:
+                    assert live.get(pid) == "live" and waiting not in live
+                    waiting = wait_phase = None
             elif name == "timer-switch":
                 assert pid != value
-                assert live[pid] == "live" and live[value] == "live"
+                assert live.get(pid) == "live" and live[value] == "live"
                 assert pid not in killed and value not in killed
                 switches.append((pid, value))
         elif match := PREEMPT.fullmatch(line):
@@ -192,21 +231,90 @@ def check(result, bounds):
             progress[pid] = value
             hits[pid] = hits.get(pid, 0) + 1
         elif line == CHECKS[3]:
+            assert live[16] == "live"
             assert len(live) == 8 and sum(state == "zombie" for state in live.values()) == 7
         else:
             assert line in CHECKS + [PASS, "controller: start", "worker: sleeping", "worker: woke"], line
-    assert live == {16: "live"} and waiting is None
+            if line in CHECKS + [PASS, "controller: start"]:
+                assert live[16] == "live", "blocked parent resumed"
+    assert live == {16: "live"} and waiting is None and wait_phase is None
+    assert wait_paths == {"blocked", "immediate"}
     assert high_water == 8 and owner_exits == 1
     assert set(hits) == {17, 18} and min(hits.values()) >= 2
     assert (17, 18) in switches and (18, 17) in switches
     assert killed == {17, 18, 19}
     expected = [137, 137, 137, 42, 31, 23, *range(60, 67), 77]
     assert wait_statuses == expected, wait_statuses
-    assert sorted(statuses) == sorted(reaped)
+    assert sorted(statuses.items()) == sorted(reaped)
     assert len(reaped) == len(expected)
     # The killed sleeper never reaches its completion message; the short one does.
     assert lines.count("worker: sleeping") == 2
     assert lines.count("worker: woke") == 1
+
+
+def wait_mutations(output):
+    """Deliberately malformed logs derived ONLY from a real positive QEMU boot.
+
+    These are oracle regression fixtures, not executions of faulty guests.
+    Keep the rest of the log (including exact guest-test statuses) unchanged.
+    """
+    lines = output.splitlines(keepends=True)
+    events = [(i, match[1], int(match[2], 16), int(match[3], 16))
+              for i, line in enumerate(lines) if (match := EVENT.fullmatch(line.strip()))]
+
+    def omit(name):
+        return "".join(line for line in lines if not line.startswith(name + " "))
+
+    yield "missing-all-wait-block", omit("wait-block")
+    yield "missing-all-wait-call", omit("wait-call")
+    swapped = lines.copy()
+    for i, name, _, value in events:
+        if name in ("zombie", "reap") and value in (60, 61):
+            swapped[i] = lines[i].replace(f"value=0x{value:016x}",
+                                          f"value=0x{121 - value:016x}")
+    assert swapped != lines
+    yield "wrong-child-status", "".join(swapped)
+    # Use another valid owned zombie, not just an invalid/self PID.
+    first = next(pid for _, name, pid, value in events if name == "zombie" and value == 60)
+    other = next(pid for _, name, pid, value in events if name == "zombie" and value == 61)
+    index = next(i for i, name, _, value in events if name == "wait-call" and value == first)
+    wrong = lines.copy()
+    wrong[index] = lines[index].replace(f"value=0x{first:016x}", f"value=0x{other:016x}")
+    yield "incorrect-target-owned-zombie", "".join(wrong)
+
+    block, _, parent, target = next(event for event in events if event[1] == "wait-block")
+    exit_index = next(i for i, name, pid, _ in events if name == "zombie" and pid == target)
+    returned = next(i for i, name, pid, _ in events
+                    if i > exit_index and name == "wait-return" and pid == parent)
+    early = lines.copy()
+    return_line = early.pop(returned)
+    early.insert(block + 1, return_line)
+    yield "wait-return-before-child-exit", "".join(early)
+
+    call = next(i for i, name, _, value in events
+                if name == "wait-call" and value == target)
+    missing = lines.copy()
+    del missing[call]
+    yield "missing-one-wait-call", "".join(missing)
+    for name, index in (("wait-call", call), ("wait-block", block)):
+        wrong = lines.copy()
+        wrong[index] = lines[index].replace(f"value=0x{target:016x}",
+                                            f"value=0x{parent:016x}")
+        yield "incorrect-target-" + name, "".join(wrong)
+    for name in ("wait-call", "wait-block", "wait-return", "reap"):
+        index = next(i for i, event, _, _ in events if event == name)
+        duplicate = lines.copy()
+        duplicate.insert(index, lines[index])
+        yield "duplicate-" + name, "".join(duplicate)
+    reap_index = next(i for i, name, pid, _ in events if name == "reap" and pid == target)
+    premature = lines.copy()
+    reap_line = premature.pop(reap_index)
+    premature.insert(returned, reap_line)
+    yield "premature-blocked-reap", "".join(premature)
+    late = lines.copy()
+    block_line = late.pop(block)
+    late.insert(exit_index, block_line)
+    yield "late-wait-block", "".join(late)
 
 
 def reject(action):
@@ -237,6 +345,10 @@ def main():
                    result.stdout.replace(CHECKS[3], ""),
                    result.stdout.replace("preempt-loop pc=0x000000008040", "preempt-loop pc=0x000000008050")):
         reject(lambda: check(subprocess.CompletedProcess([], 0, output), bounds))
+    for name, output in wait_mutations(result.stdout):
+        Path(f"build/lesson07/oracle-malformed-{name}.log").write_text(output)
+        reject(lambda: check(subprocess.CompletedProcess([], 0, output), bounds))
+        print(f"PASS: malformed-log oracle rejects {name}.")
     for status in (1, 124, -9):
         reject(lambda: check(subprocess.CompletedProcess([], status, result.stdout), bounds))
     reject(lambda: execute(command("build/lesson07/disk.img") + ["-S"],

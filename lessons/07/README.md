@@ -59,11 +59,14 @@ PASS: lesson07 preemptive scheduler and lifecycle.
 ```
 
 Additional `spawn`, `sleep`, `wake`, `preempt-loop pc=... pid=... value=...`,
-`timer-switch`, `kill`, `zombie`, `wait-block`, `wait-return` and `reap` events occur
+`timer-switch`, `kill`, `zombie`, `wait-call`, `wait-block`, `wait-return` and `reap` events occur
 between checkpoints. All numeric event fields are 16-digit hexadecimal. For
 `preempt-loop`, value is the saved `s0` progress count; `timer-switch` value is the
 selected PID; `kill` value is the victim's previous state; exit/reap/wait-return
-values are statuses. Instruction PCs and progress counts, timer-event counts,
+values are statuses. Every valid `wait(pid)` emits `wait-call` after PID/ownership
+validation, before choosing a completion path: event PID is the parent and value
+is the exact child PID (also the meaning of `wait-block`'s fields). Rejected waits
+emit no call event. Instruction PCs and progress counts, timer-event counts,
 and incidental timer switches vary with QEMU/host timing. They are **not** golden
 strings. Tests verify PCs against actual ELF loop bounds and disassemble that
 loop to ensure it contains only increment/store/jump, not an ecall. They require
@@ -75,12 +78,28 @@ must stay frozen while its sibling continues; the killed sleeper never prints
 `test.py` parses the entire log with a separate lifecycle model: no extra unknown
 lines, failure suffixes, duplicated PASS, unreaped slot reuse, non-increasing PID
 generations, progress after kill, lost statuses, or leaked children are admitted.
-It checks an eight-slot high-water mark and seven simultaneous zombies. Guest
-assertions independently exercise failed calls and exact return values. These
+It links each call's parent/target to exactly one block (if the target is live),
+that child's zombie status, return and reap. It requires both completion paths:
+`wait-call → wait-block → zombie → wait-return → reap` for blocking waits, versus
+an existing `zombie → wait-call → reap → wait-return`. Other processes may run
+between block and exit; the parent's state remains WAITING until its matching
+return, and synchronous completion steps cannot interleave. Missing calls/blocks,
+wrong targets/statuses, premature returns/reaps and duplicate/late events fail.
+It checks an eight-slot high-water mark and seven simultaneous zombies. Spawn
+logs contain entry IDs, not arguments: the host ties each return to that exact
+child's observed zombie status, then checks the controller's expected status
+sequence separately; guest assertions independently check each spawn argument's
+exact wait result and failed calls. The host does not independently reconstruct
+exit status from spawn arguments. These
 are simulator/software checks, not an independent formal proof or RTL validation.
 Logs stay under `build/lesson07/`: `positive-0.log` through `positive-2.log`,
 `pty.log`, `bad-context.log`, `timeout-rejected.log`, and optional `gdb.log` /
-`gdb-uart.log`.
+`gdb-uart.log`. `oracle-malformed-*.log` files are deliberate mutations of an
+accepted real positive boot, **not actual faulty-guest executions**. Regression
+rejectors remove calls/blocks, swap only zombie/reap statuses 60/61 while retaining
+wait returns, move a return ahead of its child's exit, corrupt targets, duplicate
+events, reap prematurely and delay a block. The separate `bad-context.log` is a
+real deliberately broken guest.
 
 ## Where to read
 
