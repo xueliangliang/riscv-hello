@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The cumulative repository contains nine experiments:
+The cumulative repository contains ten experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -46,8 +46,16 @@ The cumulative repository contains nine experiments:
   so delayed input arrives even when every application is blocked. Includes
   cursor/history editing, concurrent builtins and exact owned wait/reap tests.
 
-Lessons01–08 remain unchanged. There is still no filesystem or address-space
-isolation: PMP grants flat physical access and there are no page tables.
+- [Lesson 10 — 块设备到最小文件系统：先把数据放对位置](lessons/10/README.md)
+  adds modern virtio-blk READ/WRITE/FLUSH, a validated sixteen-file fixed-extent
+  filesystem, shell-only checked file handles/ecalls, exact EOF and cold-boot
+  persistence. Its fresh build fixture is separate from the ignored writable
+  `state/lesson10/disk.img`; ordinary builds and `make clean` preserve files.
+  Run `make run-lesson10`, `make test-lesson10`, or optional
+  `make test-lesson10-gdb`. **`make reset-lesson10` destroys saved files.**
+
+Lessons01–09 remain unchanged. There is still no address-space isolation:
+PMP grants flat physical access and there are no page tables.
 Lesson07 owns its scheduler/runtime and keeps lesson03's real disk boot chain.
 Run `make lesson07` / `make test-lesson07`; optional `make test-lesson07-gdb`
 checks A's timer trap through restoration of B's actual SP/sepc before `sret`.
@@ -55,7 +63,7 @@ See the chapter README for ABI, scope, direct QEMU commands and log oracles.
 Run `make lesson04` / `make test-lesson04`, `make lesson05` /
 `make test-lesson05`, or `make lesson06` / `make test-lesson06` for earlier steps;
 full `make test` keeps all earlier regressions. Guest logs are under
-`build/lesson04/` through `build/lesson09/`.
+`build/lesson04/` through `build/lesson10/`.
 Run `make run-lesson09` for the persistent shell; only `shutdown` exits it.
 `make test-lesson09` drives real serial PTY commands, cursor/history/Tab edits,
 owned wait/reap, slot exhaustion and RX overflow recovery. Optional

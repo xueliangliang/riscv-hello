@@ -465,3 +465,52 @@ inspect-lesson09: build/lesson09/bootloader.elf build/lesson09/kernel.elf build/
 inspect: inspect-lesson09
 run-lesson09: lesson09
 	$(PYTHON) lessons/09/run.py
+
+# Lesson10: independent runtime queue and persistent FlatFS fixture.
+FLAT_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/10 -Ibuild/lesson10
+FLAT_COMMON := build/lesson10/start.o build/lesson10/runtime.o build/lesson10/trap.o build/lesson10/fs.o build/lesson02/uart.o
+build/lesson10:
+	mkdir -p $@
+build/lesson10/%.o: lessons/10/%.S | build/lesson10
+	$(CC) $(FLAT_FLAGS) -c -o $@ $<
+build/lesson10/%.o: lessons/10/%.c $(wildcard lessons/10/*.h) | build/lesson10
+	$(CC) $(FLAT_FLAGS) -c -o $@ $<
+build/lesson10/user.elf: build/lesson10/user-start.o build/lesson10/user.o build/lesson10/filetest.o build/lesson10/syscall.o lessons/10/user.ld
+	$(CC) $(FLAT_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/10/user.ld -o $@ $(filter %.o,$^)
+build/lesson10/user-symbols.h: build/lesson10/user.elf lessons/10/symbols.py
+	$(PYTHON) lessons/10/symbols.py $(CROSS_COMPILE)nm $< $@
+build/lesson10/kernel.o: build/lesson10/user-symbols.h
+build/lesson10/kernel.elf: $(FLAT_COMMON) build/lesson10/block.o build/lesson10/kernel.o lessons/10/kernel.ld
+	$(CC) $(FLAT_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/10/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson10/block-no-flush.o: lessons/10/block.c lessons/10/block.h | build/lesson10
+	$(CC) $(FLAT_FLAGS) -DNO_FLUSH -c -o $@ $<
+build/lesson10/kernel-no-flush.elf: $(FLAT_COMMON) build/lesson10/block-no-flush.o build/lesson10/kernel.o lessons/10/kernel.ld
+	$(CC) $(FLAT_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/10/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson10/bootloader.elf: build/lesson10/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(FLAT_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+build/lesson10/%.bin: build/lesson10/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+build/lesson10/disk.img: build/lesson10/kernel.bin build/lesson10/user.bin tools/make-disk-image.py lessons/10/format.py
+	$(PYTHON) lessons/10/format.py build/lesson10/kernel.bin build/lesson10/user.bin $@
+build/lesson10/disk-no-flush.img: build/lesson10/kernel-no-flush.bin build/lesson10/user.bin tools/make-disk-image.py lessons/10/format.py
+	$(PYTHON) lessons/10/format.py build/lesson10/kernel-no-flush.bin build/lesson10/user.bin $@
+.PHONY: lesson10 run-lesson10 reset-lesson10 test-lesson10 inspect-lesson10
+lesson10: build/lesson10/bootloader.elf build/lesson10/disk.img
+all: lesson10
+run-lesson10: lesson10
+	QEMU="$(QEMU)" $(PYTHON) lessons/10/run.py $(LESSON10_ARGS)
+reset-lesson10: lesson10
+	$(PYTHON) lessons/10/run.py --reset
+# --reset is explicit destructive replacement, protected by the same host lock.
+test-lesson10: lesson10 build/lesson10/disk-no-flush.img
+	QEMU="$(QEMU)" $(PYTHON) lessons/10/test.py
+test: test-lesson10
+inspect-lesson10: build/lesson10/bootloader.elf build/lesson10/kernel.elf build/lesson10/user.elf
+	$(READELF) -h -lW $^
+	$(OBJDUMP) -d $^
+inspect: inspect-lesson10
+
+.PHONY: test-lesson10-gdb
+test-lesson10-gdb: lesson10
+	QEMU="$(QEMU)" $(PYTHON) lessons/10/gdb-test.py
