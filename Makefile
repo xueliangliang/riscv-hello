@@ -344,3 +344,76 @@ inspect: inspect-lesson07
 .PHONY: test-lesson07-gdb
 test-lesson07-gdb: lesson07
 	$(PYTHON) lessons/07/gdb-test.py
+
+# Lesson08 has a hart-filtering boot wrapper; unchanged lesson03 C loads disk.
+SMP_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/08 -Ibuild/lesson08
+SMP_COMMON := build/lesson08/start.o build/lesson08/runtime.o build/lesson08/kernel.o build/lesson02/uart.o
+
+build/lesson08:
+	mkdir -p $@
+
+build/lesson08/%.o: lessons/08/%.S | build/lesson08
+	$(CC) $(SMP_FLAGS) -c -o $@ $<
+
+build/lesson08/%.o: lessons/08/%.c lessons/08/abi.h lessons/08/runtime.h lessons/08/process.h lessons/08/syscall.h | build/lesson08
+	$(CC) $(SMP_FLAGS) -c -o $@ $<
+
+build/lesson08/user.elf: build/lesson08/user-start.o build/lesson08/user.o build/lesson08/workers.o build/lesson08/syscall.o lessons/08/user.ld
+	$(CC) $(SMP_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/08/user.ld -o $@ $(filter %.o,$^)
+
+build/lesson08/user-symbols.h: build/lesson08/user.elf lessons/08/symbols.py
+	$(PYTHON) lessons/08/symbols.py $(CROSS_COMPILE)nm $< $@
+
+build/lesson08/kernel.o: build/lesson08/user-symbols.h
+
+build/lesson08/kernel.elf: $(SMP_COMMON) build/lesson08/trap.o lessons/08/kernel.ld
+	$(CC) $(SMP_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/08/kernel.ld -o $@ $(filter %.o,$^)
+
+build/lesson08/trap-bad-context.o: lessons/08/trap.S | build/lesson08
+	$(CC) $(SMP_FLAGS) -DBAD_CONTEXT -c -o $@ $<
+
+build/lesson08/kernel-bad-context.elf: $(SMP_COMMON) build/lesson08/trap-bad-context.o lessons/08/kernel.ld
+	$(CC) $(SMP_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/08/kernel.ld -o $@ $(filter %.o,$^)
+
+build/lesson08/%.bin: build/lesson08/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+
+build/lesson08/disk.img: build/lesson08/kernel.bin build/lesson08/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson08/user.bin $@
+
+build/lesson08/disk-bad-context.img: build/lesson08/kernel-bad-context.bin build/lesson08/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson08/user.bin $@
+
+.PHONY: lesson08 test-lesson08 inspect-lesson08
+lesson08: build/lesson08/bootloader.elf build/lesson08/disk.img
+all: lesson08
+
+test-lesson08: lesson08 build/lesson08/disk-bad-context.img build/lesson08/disk-bad-lock.img
+	QEMU="$(QEMU)" NM="$(CROSS_COMPILE)nm" OBJDUMP="$(OBJDUMP)" $(PYTHON) lessons/08/test.py
+
+test: test-lesson08
+
+inspect-lesson08: build/lesson08/bootloader.elf build/lesson08/kernel.elf build/lesson08/user.elf
+	$(READELF) -h -lW $^
+	$(OBJDUMP) -d $^
+
+inspect: inspect-lesson08
+
+
+build/lesson08/bootloader.elf: build/lesson08/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(SMP_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+
+# Same U payload and symbol layout; only initialization selects broken locking.
+build/lesson08/kernel-bad-lock.o: lessons/08/kernel.c build/lesson08/user-symbols.h lessons/08/process.h lessons/08/abi.h lessons/08/runtime.h
+	$(CC) $(SMP_FLAGS) -DBAD_LOCK -c -o $@ $<
+
+build/lesson08/kernel-bad-lock.elf: $(filter-out build/lesson08/kernel.o,$(SMP_COMMON)) build/lesson08/kernel-bad-lock.o build/lesson08/trap.o lessons/08/kernel.ld
+	$(CC) $(SMP_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/08/kernel.ld -o $@ $(filter %.o,$^)
+
+build/lesson08/disk-bad-lock.img: build/lesson08/kernel-bad-lock.bin build/lesson08/user.bin tools/make-disk-image.py
+	$(PYTHON) tools/make-disk-image.py $< build/lesson08/user.bin $@
+
+.PHONY: test-lesson08-gdb
+test-lesson08-gdb: lesson08
+	$(PYTHON) lessons/08/gdb-test.py

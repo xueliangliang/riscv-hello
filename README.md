@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The current `main` contains seven experiments:
+The current `main` contains eight experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -34,7 +34,13 @@ The current `main` contains seven experiments:
   blocking sleep and spawn/exit/kill/wait/reap/relaunch. A real U-mode controller
   tests eight-slot exhaustion, unreaped zombies, ownership and generation PIDs.
 
-Lessons01–06 remain unchanged. There is still no filesystem or address-space
+- [Lesson 08 — 两个 hart 真正执行用户进程：启动顺序、锁与生命周期](lessons/08/README.md)
+  adds a hart-filtering disk-boot wrapper, per-hart M/S stacks and Sstc setup,
+  globally locked lifecycle/scheduling with explicit pinned affinity, and safe
+  remote RUNNING kill. Real U workers on both harts contend on a shared lock
+  and verify an exact 8000-update counter; broken locking/restoration fail.
+
+Lessons01–07 remain unchanged. There is still no filesystem or address-space
 isolation: PMP grants flat physical access and there are no page tables.
 Lesson07 owns its scheduler/runtime and keeps lesson03's real disk boot chain.
 Run `make lesson07` / `make test-lesson07`; optional `make test-lesson07-gdb`
@@ -43,8 +49,13 @@ See the chapter README for ABI, scope, direct QEMU commands and log oracles.
 Run `make lesson04` / `make test-lesson04`, `make lesson05` /
 `make test-lesson05`, or `make lesson06` / `make test-lesson06` for earlier steps;
 full `make test` keeps all earlier regressions. Guest logs are under
-`build/lesson04/` through `build/lesson07/`.
-Lessons06–07 explicitly use QEMU `-cpu rv64,sstc=true`; they do not use OpenSBI,
+`build/lesson04/` through `build/lesson08/`.
+Run `make lesson08` / `make test-lesson08`; optional `make test-lesson08-gdb`
+checks actual timer-frame restoration separately on both harts. Lesson08's
+persistent lock-aware idle polls with SIE disabled; it is not an interactive
+shell or an interrupt-driven console, and its demonstration exits only through
+an explicit U controller DONE syscall.
+Lessons06–08 explicitly use QEMU `-cpu rv64,sstc=true`; they do not use OpenSBI,
 an M-mode timer relay, PLIC timer interrupts or cooperative yielding.
 
 ## Reproduce
