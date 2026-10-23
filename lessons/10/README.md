@@ -145,11 +145,12 @@ python3 lessons/10/decode.py build/lesson10/evidence-patterns.img
 `make test-lesson10-gdb` runs real-child logging regressions (success,
 nonzero, timeout, early guest assertion and launch failure). Its first recipe
 command truncates `build/lesson10/gdb-flush.log` through
-`lessons/10/fresh-log.py` — before the runner regression step and before any
-launch or guest wait — and `gdb-test.py` repeats that truncation idempotently
-for direct invocations. A failure in either step therefore never leaves a
-previous run's PASS behind; e.g.
-`TMPDIR=/nonexistent/definitely-not-here make test-lesson10-gdb` fails in the
+`lessons/10/fresh-log.py` — before the lesson itself is built, before the
+runner regression step, and before any launch or guest wait — and `gdb-test.py`
+repeats that truncation idempotently for direct invocations. A failure in any
+of those steps therefore never leaves a previous run's PASS behind; e.g. a
+deliberately broken source file, or
+`TMPDIR=/nonexistent/definitely-not-here make test-lesson10-gdb`, fails in the
 runner regression and the log is empty, containing no PASS. The runner
 regressions also assert that the helper clears a file containing a fake PASS
 and reports a truncation error. Failures retain partial combined stdout/stderr,
