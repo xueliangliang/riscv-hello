@@ -420,6 +420,7 @@ test-lesson08-gdb: lesson08
 
 .PHONY: test-lesson09-gdb
 test-lesson09-gdb: lesson09
+	$(PYTHON) lessons/09/gdb-runner-test.py
 	QEMU="$(QEMU)" $(PYTHON) lessons/09/gdb-test.py
 
 # Lesson09: own disk-boot runtime and interactive payload.

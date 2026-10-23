@@ -208,6 +208,14 @@ byte101 (`e`), owner/lock release and actual restored SP/tp/sscratch before
 `sret`. After detach it sends `cho gdb-woke`, requires actual `echo: gdb-woke`,
 then explicit shutdown0. Logs: `gdb.log`, `gdb-uart.log`.
 
+The final, already-unlocked straight-line restore epilogue uses GDB scheduler
+locking so the other hart cannot hit the shared software breakpoint on `sret`
+and trigger a hidden step toward unreachable pc+4. Detach resumes both harts;
+it is not runtime scheduler locking or evidence of a kernel deadlock. Timeout
+partial stdout is saved even when Python supplies bytes with `text=True`.
+The GDB target first runs `gdb-runner-test.py` against real successful, failed
+and timed-out subprocesses; no timeout is accepted as guest success.
+
 These are QEMU software/architectural observations. They do not prove physical
 UART timing/electrical behavior, device FIFO overrun absence, RTL correctness,
 FPGA behavior, real-board interrupt routing/power management, isolation,

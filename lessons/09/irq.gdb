@@ -34,6 +34,10 @@ if (struct TrapFrame *)$a0 != &processes[0].frame || processes[0].frame.x[10] !=
 end
 printf "IRQ count=%ld read-wakes=%ld return-byte=%ld lock-owner=%d\n", external_irqs, read_wakes, processes[0].frame.x[10], scheduler_owner
 delete breakpoints
+# This frame is already unlocked; run only its straight-line restore epilogue.
+# Otherwise another hart can hit the shared software sret breakpoint and make
+# GDB silently single-step that hart toward unreachable pc+4. Detach resumes all.
+set scheduler-locking on
 tbreak restore_user_return thread 1
 continue
 if $tp != processes[0].frame.x[4] || $sp != processes[0].frame.x[2] || $sscratch != harts[0].stack_top || ($sstatus & 0x102) != 0
