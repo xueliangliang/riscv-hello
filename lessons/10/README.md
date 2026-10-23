@@ -138,6 +138,12 @@ Key evidence under `build/lesson10/`:
 python3 lessons/10/decode.py build/lesson10/evidence-patterns.img
 ```
 
+The GDB gate first runs real-child logging regressions (success, nonzero,
+timeout, early guest assertion and launch failure). Each run truncates
+`gdb-flush.log` before launch or guest waits; failures retain partial combined
+stdout/stderr, append a failure diagnostic, kill/drain/reap any debugger, and
+still fail the gate. A previous run's PASS is never reused.
+
 The optional GDB gate stops at `block_completion_observed` after validation,
 asserts type4, a 16-byte header→one-byte status with no data descriptor,
 used id0/length1/status0, detaches, then executes an IRQ-driven echo and clean

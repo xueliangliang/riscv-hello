@@ -513,4 +513,5 @@ inspect: inspect-lesson10
 
 .PHONY: test-lesson10-gdb
 test-lesson10-gdb: lesson10
+	$(PYTHON) lessons/10/gdb-runner-test.py
 	QEMU="$(QEMU)" $(PYTHON) lessons/10/gdb-test.py

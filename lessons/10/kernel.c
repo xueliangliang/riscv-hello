@@ -275,7 +275,9 @@ static long file_syscall(long number, unsigned long first, unsigned long second,
         char name[32];
         unsigned i;
         for (i = 0; i < sizeof(name); i++) {
-            if (!readable(first + i, 1) || first + i < first) {
+            /* The whole copied prefix must fit ONE admitted region, even
+               when adjacent shared/private ranges are both readable. */
+            if (!readable(first, i + 1)) {
                 return E_ARG;
             }
             name[i] = *(const char *)(first + i);
@@ -283,7 +285,8 @@ static long file_syscall(long number, unsigned long first, unsigned long second,
                 break;
             }
         }
-        if (i == sizeof(name) || second > 1) {
+        if (i == sizeof(name) ||
+            (number == FS_OPEN ? second > 1 : second != 0)) {
             return E_ARG;
         }
         return number == FS_OPEN ? fs_open(name, second) : fs_remove(name);

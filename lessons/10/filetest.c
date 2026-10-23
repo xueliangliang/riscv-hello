@@ -43,6 +43,65 @@ static void verify(const char *name, unsigned count)
     require(syscall3(FS_WRITE, h, (unsigned long)output, 1) == F_MODE, "FAIL readonly handle\n");
     checked_close(h);
 }
+static void boundary_names(unsigned long end)
+{
+    /* Flat physical U access lets this probe stage both sides. Restore every
+       boundary byte before asserting, including the adjacent private block. */
+    volatile unsigned char *edge = (void *)(end - 2);
+    unsigned char saved[3];
+    for (unsigned i = 0; i < 3; i++) {
+        saved[i] = edge[i];
+    }
+    edge[0] = 'x';
+    edge[1] = 0;
+    long legal = open_file((const char *)edge, FS_EXISTING);
+    long closed = legal >= 4 ? file_close(legal) : F_HANDLE;
+    edge[1] = 'x';
+    edge[2] = 0;
+    long existing = open_file((const char *)(edge + 1), FS_EXISTING);
+    long replace = open_file((const char *)(edge + 1), FS_REPLACE);
+    long remove = file_remove((const char *)(edge + 1));
+    for (unsigned i = 0; i < 3; i++) {
+        edge[i] = saved[i];
+    }
+    require(legal >= 4, "FAIL legal name boundary\n");
+    require(closed == 0, "FAIL boundary close\n");
+    require(existing == F_ARG, "FAIL crossing existing name\n");
+    require(replace == F_ARG, "FAIL crossing replace name\n");
+    require(remove == F_ARG, "FAIL crossing remove name\n");
+    verify("x", 513);
+}
+static void name_arguments(void)
+{
+    /* Rejected open/remove must neither truncate nor delete the raw-checked
+       b511 fixture. FS_REMOVE has a reserved zero argument, not an open mode. */
+    require(open_file("b511", 2) == F_ARG, "FAIL invalid replace mode\n");
+    require(syscall2(FS_REMOVE, (unsigned long)"b511", 1) == F_ARG,
+            "FAIL remove reserved argument\n");
+    verify("b511", 511);
+    char unterminated[32];
+    for (unsigned i = 0; i < sizeof(unterminated); i++) {
+        unterminated[i] = 'x';
+    }
+    require(open_file(unterminated, FS_REPLACE) == F_ARG, "FAIL unterminated name\n");
+    /* First test creation rejection, then existing-file preservation. */
+    volatile unsigned char *edge = (void *)(USER_DATA_END - 1);
+    unsigned char a = edge[0];
+    unsigned char b = edge[1];
+    edge[0] = 'x';
+    edge[1] = 0;
+    long result = open_file((const char *)edge, FS_REPLACE);
+    edge[0] = a;
+    edge[1] = b;
+    require(result == F_ARG, "FAIL crossing name creates\n");
+    require(open_file("x", FS_EXISTING) == F_MISSING, "FAIL crossing directory mutation\n");
+    create("x", 513);
+    boundary_names(USER_DATA_END);
+    boundary_names(DATA_BASE + DATA_SIZE);
+    boundary_names(STACK_BASE + STACK_SIZE);
+    require(file_remove("x") == 0, "FAIL boundary cleanup\n");
+    say("fstest: name regions and reserved remove argument PASS\n");
+}
 void file_test(int checking)
 {
     for (unsigned i = 0; i < 4096; i++) {
@@ -61,6 +120,7 @@ void file_test(int checking)
             create(names[i], sizes[i]);
             verify(names[i], sizes[i]);
         }
+        name_arguments();
         create("short", 513);
         create("short", 3);
         verify("short", 3);

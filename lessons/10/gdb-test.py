@@ -11,9 +11,62 @@ from run import command
 from test import Guest
 
 
+class DebuggerSession:
+    """One fresh log and one reaped child, including pre-communicate failures."""
+    def __init__(self, log):
+        self.log = Path(log)
+        self.log.write_bytes(b"")
+        self.process = None
+        self.output = None
+
+    def __enter__(self):
+        return self
+
+    def start(self, argv):
+        self.process = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT)
+
+    def collect(self, timeout=15):
+        assert self.process is not None, "debugger not started"
+        try:
+            self.output, _ = self.process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # communicate() after kill returns the complete accumulated bytes,
+            # not just the suffix; do not duplicate TimeoutExpired.output.
+            self.process.kill()
+            self.output, _ = self.process.communicate()
+            self.log.write_bytes(self.output)
+            raise
+        self.log.write_bytes(self.output)
+        return self.output
+
+    def __exit__(self, kind, error, traceback):
+        try:
+            if self.process is not None and self.output is None:
+                if self.process.poll() is None:
+                    self.process.kill()
+                self.output, _ = self.process.communicate()
+                self.log.write_bytes(self.output)
+        finally:
+            if error is not None:
+                with self.log.open("ab") as stream:
+                    stream.write(f"\nFAIL GDB gate: {kind.__name__}: {error}\n".encode(errors="replace"))
+        return False
+
+
 def main():
+    # Truncate before fixture lookup, launch, or any guest wait can fail.
+    with DebuggerSession("build/lesson10/gdb-flush.log") as debugger:
+        base = Path("build/lesson10/disk.img")
+        before = hashlib.sha256(base.read_bytes()).hexdigest()
+        try:
+            return check_flush(debugger)
+        finally:
+            assert hashlib.sha256(base.read_bytes()).hexdigest() == before
+
+
+def check_flush(debugger):
     base = Path("build/lesson10/disk.img")
-    before = hashlib.sha256(base.read_bytes()).hexdigest()
     with tempfile.TemporaryDirectory(prefix="lesson10-gdb-") as scratch:
         scratch = Path(scratch)
         disk = scratch / "disk.img"
@@ -60,23 +113,17 @@ quit
 """)
         opts = command(str(disk)) + ["-S", "-gdb", f"tcp:127.0.0.1:{port}"]
         g = Guest("gdb-uart.log", str(disk), options=opts)
-        debugger = None
         try:
-            debugger = subprocess.Popen([os.environ.get("GDB", "gdb-multiarch"), "-q", "-batch", "-x", str(commands)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            debugger.start([os.environ.get("GDB", "gdb-multiarch"), "-q", "-batch", "-x", str(commands)])
             g.until("10> ", 10)
             g.send("fwrite proof durable\r")
-            output, _ = debugger.communicate(timeout=15)
-            Path("build/lesson10/gdb-flush.log").write_bytes(output)
-            assert debugger.returncode == 0 and b"PASS GDB: actual FLUSH" in output, output.decode(errors="replace")
+            output = debugger.collect(timeout=15)
+            assert debugger.process.returncode == 0 and b"PASS GDB: actual FLUSH" in output, output.decode(errors="replace")
             g.until("fwrite target=0 result=7\r\n10> ")
             g.cmd("echo after-debugger", "echo: after-debugger\r\n")
             g.shutdown()
         finally:
-            if debugger and debugger.poll() is None:
-                debugger.kill()
-                debugger.wait(timeout=3)
             g.close()
-    assert hashlib.sha256(base.read_bytes()).hexdigest() == before
     print("PASS lesson10 GDB: validated device FLUSH completion, detach, live IRQ echo, shutdown")
 
 
