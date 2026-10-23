@@ -34,7 +34,13 @@ python
 hart = int(gdb.parse_and_eval("$mhartid"))
 assert hart == int(gdb.parse_and_eval("$target_hart"))
 probe.delete()
-# A thread-specific one-shot catches the selected frame's actual epilogue.
+# Thread-specific software breakpoints are still inserted on BOTH CPUs.
+# A non-target hart hitting sret makes GDB step only that CPU toward pc+4,
+# which sret never reaches; the target remains stopped before its epilogue.
+# This selected frame is already unlocked, and restore_frame -> sret is
+# straight-line assembly with no lock acquisition. Run only this hart until
+# the one-shot; detach below resumes BOTH CPUs for the full runtime oracle.
+gdb.execute("set scheduler-locking on")
 thread = gdb.selected_thread().global_num
 gdb.execute(f"tbreak *restore_user_return thread {thread}")
 end
