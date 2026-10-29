@@ -285,8 +285,57 @@ static void bad_arguments(void)
     require(file_remove("1234567890123456789012345678901") == 0, "FAIL name31 cleanup\n");
     say("fstest: owner names buffers handles reserved args PASS\n");
 }
+/* Separate disposable-image regression: the host seeds the persisted epoch,
+   then the ordinary kernel advances it with a real write before cold boot. */
+static void epoch_test(int phase)
+{
+    long (*write_operation)(long, const void *, unsigned long) =
+        phase == 5 ? file_write : file_append;
+    long h = file_open("max", FS_RW);
+    long readonly = file_open("short", FS_EXISTING);
+    require(h >= 4 && readonly >= 4, "FAIL epoch handles\n");
+    if (phase == 7) {
+        /* The host injects an actual device FLUSH error, poisoning the FS. */
+        require(file_write(h, buffer, 1) == F_IO, "FAIL epoch poison injection\n");
+        require(file_write(h, buffer, 0) == F_IO, "FAIL epoch poisoned write\n");
+        require(file_append(h, buffer, 0) == F_IO, "FAIL epoch poisoned append\n");
+        say("PASS epoch poison validation\n");
+        return;
+    }
+    struct ListCursor cursor = {0, 0};
+    require(file_list_page(listing, 1, &cursor) == 1, "FAIL epoch snapshot\n");
+    require(write_operation(-1, buffer, 0) == F_HANDLE, "FAIL epoch bad handle\n");
+    require(write_operation(readonly, buffer, 0) == F_MODE, "FAIL epoch readonly\n");
+    require(write_operation(h, (void *)0, 0) == F_ARG, "FAIL epoch null pointer\n");
+    require(write_operation(h, (void *)~0UL, 0) == F_ARG, "FAIL epoch wrap pointer\n");
+    require(write_operation(h, buffer, 4097) == F_ARG, "FAIL epoch oversize\n");
+    require(file_seek(h, 9000) == 9000, "FAIL epoch seek\n");
+    long zero = write_operation(h, buffer, 0);
+    require(zero == 0, phase == 5 ? "FAIL epoch zero write\n" : "FAIL epoch zero append\n");
+    require(file_read(h, buffer, 1) == 1 && buffer[0] == 'Q', "FAIL epoch cursor/payload\n");
+    require(file_seek(h, 9000) == 9000, "FAIL epoch reseek\n");
+    buffer[0] = 'X';
+    require(write_operation(h, buffer, 1) == F_FULL, "FAIL epoch nonzero\n");
+    require(file_read(h, buffer, 1) == 1 && buffer[0] == 'Q', "FAIL epoch rejected cursor/payload\n");
+    require(file_seek(h, FS_BYTES) == FS_BYTES, "FAIL epoch limit seek\n");
+    require(write_operation(h, buffer, 0) == 0, "FAIL epoch zero at file limit\n");
+    require(file_read(h, buffer, 1) == 0, "FAIL epoch limit cursor\n");
+    close_checked(h);
+    close_checked(readonly);
+    h = file_open("short", FS_RW);
+    require(h >= 4, "FAIL epoch short handle\n");
+    require(write_operation(h, buffer, 1) == F_FULL, "FAIL epoch nonzero below limit\n");
+    require(file_read(h, buffer, 1) == 1 && buffer[0] == 's', "FAIL epoch short cursor/payload\n");
+    close_checked(h);
+    require(file_list_page(listing, 1, &cursor) == 1, "FAIL epoch changed enumeration\n");
+    say("PASS epoch no-op validation cursor payload enumeration\n");
+}
 void file_test(int verify)
 {
+    if (verify >= 5) {
+        epoch_test(verify);
+        return;
+    }
     if (!verify || verify == 2) {
         for (unsigned i = 0; i < 224; i++) {
             unsigned index = i < 80 ? i : i < 160 ? 239 - i : 160 + ((i - 160) * 17 % 64);

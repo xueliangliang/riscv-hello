@@ -252,7 +252,8 @@ static void execute(char *line)
     } else if (equal(line, "fstest") || equal(line, "fsverify")) {
         int phase = equal(line, "fsverify") ? 1 :
                     equal(arg, "create") ? 2 : equal(arg, "delete") ? 3 :
-                    equal(arg, "recreate") ? 4 : 0;
+                    equal(arg, "recreate") ? 4 : equal(arg, "epoch-write") ? 5 :
+                    equal(arg, "epoch-append") ? 6 : equal(arg, "epoch-poison") ? 7 : 0;
         file_test(phase);
     } else if (equal(line, "rm")) {
         result("rm", 0, file_remove(arg));

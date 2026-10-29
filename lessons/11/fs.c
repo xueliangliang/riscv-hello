@@ -677,11 +677,11 @@ static long write_at(long token, const void *buffer, unsigned count, int append)
     unsigned char *r = lookup(h->name);
     unsigned size = get32(r + 32);
     unsigned position = append ? size : h->cursor;
-    if (count > FS_BYTES - position || epoch == 0xffffffffU) {
-        return F_FULL;
-    }
     if (!count) {
         return 0;
+    }
+    if (count > FS_BYTES - position || epoch == 0xffffffffU) {
+        return F_FULL;
     }
     if (position + count > size) {
         int result = resize(r, position + count);

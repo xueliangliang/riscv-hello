@@ -113,6 +113,13 @@ type1 WRITE、type4 FLUSH，验证 used ID/长度/index/status。FLUSH 的描述
   once 故障后仍 poison，shutdown 必须失败。不是把超时或源码故障当崩溃恢复。
 * 修改真实成功 transcript 的 bytes/EOF/返回数/size/重复项/rm/coldbytes，以及
   raw 内容/padding/链，oracle 必须失败；超时始终失败并清理子进程组。
+* `epoch-test.py`（包含在 `make test-lesson11`，也可在 `make lesson11` 后单独运行）
+  只在可丢弃盘上把持久化 epoch 设为 `0xfffffffe`，再用真实 U 写推进到
+  `0xffffffff` 并关机。两次 cold boot 分别验证 WRITE/APPEND：零长度成功且
+  游标、枚举 epoch、payload 和整盘 bytes 不变；65536 字节文件的末端也成功。
+  非零写仍返回 F_FULL；坏 handle、只读 mode、无效 pointer、过大 count 仍拒绝。
+  另一 VM 用真实 FLUSH IOERR 验证两个零长度调用在 poison 后仍返回 F_IO。
+  `epoch-*.log` 保存各 VM 串口输出，`epoch-result.log` 只在全部通过后写 PASS。
 * 启动器 copy-once/重启/锁冲突/明确 reset/坏盘不改写。fixture 哈希在 finally 校验。
 
 输出在 `build/lesson11/`：`test-result.json`、`raw-decoder.json`、
