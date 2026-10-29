@@ -139,6 +139,10 @@ static int fail_device(int error_code)
 
 int block_init(void)
 {
+    /* Quarantine requests throughout reset/negotiation, including retries.
+     * DMA storage is static and MUST remain untouched until reset reads zero.
+     * Every early return leaves the driver poisoned, even on a first init. */
+    poisoned = 1;
     device_registers = NULL;
     device_capacity = 0U;
 
@@ -166,6 +170,8 @@ int block_init(void)
             return fail_device(-20);
         }
     }
+    /* Reset acknowledgement ends device ownership of the old DMA queue.
+     * Only below here may we reinitialize its rings and request storage. */
     write_register(VIRTIO_MMIO_STATUS, DEVICE_STATUS_ACKNOWLEDGE);
     write_register(VIRTIO_MMIO_STATUS,
                    DEVICE_STATUS_ACKNOWLEDGE | DEVICE_STATUS_DRIVER);
@@ -238,10 +244,15 @@ int block_init(void)
     device_capacity = ((uint64_t)capacity_high << 32) | capacity_low;
     last_used_index = used_ring.index;
 
-    if (read_register(0xfc) != config_generation || device_capacity != 16384U) {
+    if (read_register(0xfc) != config_generation || device_capacity != 16384U ||
+        read_register(VIRTIO_MMIO_STATUS) != status ||
+        read_register(VIRTIO_MMIO_QUEUE_READY) != 1U) {
         return fail_device(-35);
     }
 
+    /* Not merely a reset attempt: a confirmed reset AND a validated new
+     * queue/feature/capacity negotiation are required to release quarantine. */
+    poisoned = 0;
     return 0;
 }
 

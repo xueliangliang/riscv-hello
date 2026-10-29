@@ -114,6 +114,9 @@ void journal_abort(void)
     active = 0;
     count = 0;
     /* An I/O error stays poisoned; a capacity rejection does not. */
+    if (error == J_LIMIT && !poisoned) {
+        error = 0;
+    }
 }
 int journal_io(unsigned type, unsigned sector, void *buffer)
 {

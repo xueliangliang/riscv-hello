@@ -60,6 +60,8 @@ def main():
     commands = [
         ('gate-build', [os.environ.get('MAKE', 'make'), '--no-print-directory', 'lesson12', 'build/lesson12/disk-no-flush.img']),
         ('gate-model', [sys.executable, 'lessons/12/model-test.py']),
+        ('gate-recovery', [sys.executable, 'lessons/12/recovery-test.py']),
+        ('gate-block-reset', [sys.executable, 'lessons/12/block-reset-test.py']),
         ('gate-protocol-mutation', [sys.executable, 'lessons/12/protocol-mutation-test.py']),
         ('gate-runtime', [sys.executable, 'lessons/12/test.py']),
         ('gate-epoch', [sys.executable, 'lessons/12/epoch-test.py']),
@@ -68,11 +70,14 @@ def main():
         stages.append(stage(name, argv))
     model = json.loads((BUILD / 'model-results.json').read_text())
     crash = json.loads((BUILD / 'crash-results.json').read_text())
+    recovery = json.loads((BUILD / 'recovery-all-results.json').read_text())
+    assert recovery['status'] == 'PASS' and len(recovery['QEMU_remount']) == 2
     assert model['case_count'] == len(model['cases'])
     assert crash['case_count'] == len(crash['cases'])
     result = {'status': 'PASS', 'stages': stages,
               'native_crash_error_cases': model['case_count'],
               'native_recovery_error_cases': model['recovery_error_count'],
+              'immediate_limit_sync_U_shutdown_and_real_driver_remount': recovery,
               'QEMU_crash_cases': crash['case_count'],
               'QEMU_dualhart_cold_replay': crash['dualhart_U_shell_cold_replay']}
     (BUILD / 'results.json').write_text(json.dumps(result, indent=2) + '\n')

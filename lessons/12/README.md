@@ -87,10 +87,16 @@ nothing. Empty transactions issue no device requests.
   state, leave the entire disk unchanged and keep the filesystem usable.
   Large defrag is rejected, not silently split into weaker transactions.
   Small defrag really moves blocks and preserves file contents.
+  Aborting a capacity rejection clears its transaction-local error, so an
+  immediate sync/shutdown still issues a real FLUSH without another open.
 - Device I/O failure returns `F_IO=-14` and poisons the mounted filesystem until
   recovery. A failed WRITE or FLUSH may already have persisted. In particular,
   once commit-header WRITE has been attempted, an error does **not** promise
   rollback to PRE. Reboot/remount resolves durable PRE or POST.
+  Same-runtime `fs_mount()` resets and reinitializes the real driver before
+  replay. Static DMA storage remains quarantined until reset acknowledgement;
+  requests resume only after complete queue/feature/geometry validation.
+  Missing device, reset timeout or failed reinitialization retains quarantine.
 - File limits remain 512 files, 64 KiB per file and four generation-checked
   handles, with one open per file. File ecalls remain shell-owned; ownership is
   checked before user pointers. Whole buffers must fit one allowed region;
@@ -130,7 +136,22 @@ recursive build. It then runs:
   limit and deliberately saturate the bounded trace to prove rejection.
 - `protocol-mutation-test.py` runs isolated broken copies: missing commit
   FLUSH, suppressed native trace-overflow reporting and a signed trace FFI
-  return must each fail for the expected reason.
+  return must each fail for the expected reason. Three additional mutations
+  reject ungated initialization, early poison release and pre-reset ring reuse.
+- `recovery-test.py` checks immediate native type4 sync after oversized defrag
+  and direct journal abort, RAM enumeration/cursor/epoch rollback and exact
+  whole-image nonmutation. The real dual-hart U shell rejects defrag at capacity
+  and immediately shuts down successfully without an intervening FS open.
+  Two real MMIO/QEMU once-only WRITE IOERR probes cover pre-commit log payload
+  and post-commit checkpoint errors: poison remains sticky before reset, then
+  same-runtime remount yields exact PRE/POST respectively, permits a new
+  mutation and survives a read-only cold boot without changing any disk bytes.
+- `block-reset-test.py` compiles the actual driver control flow with only
+  native time/fence/MMIO substitutions. Canary DMA objects must not change
+  before reset ACK; missing device, reset timeout, missing FLUSH, queue setup
+  and capacity failures must retain poison. Only a fully initialized new
+  queue may submit a FLUSH. These are transport-shim fault tests, not claims
+  that stock QEMU simulates delayed reset ACK or real outstanding hardware DMA.
 - `test.py` and `epoch-test.py` exercise real U ecalls, B+ splits, full capacity,
   defrag, cold boots, pointer/ownership checks, maximum epoch and actual device
   READ/WRITE/FLUSH IOERR with sticky poison. A dirty operation precedes FLUSH
@@ -146,7 +167,8 @@ recursive build. It then runs:
   kill/drain/reap failed children and reject timeouts and early guest failures.
 
 Evidence is under `build/lesson12/`: `results.json`, `model-results.json`,
-`crash-results.json`, `protocol-mutation.json`, per-stage/per-guest logs and
+`crash-results.json`, `recovery-all-results.json`, `protocol-mutation.json`,
+`block-reset-test.log`, per-stage/per-guest logs and
 `gdb-flush.log`. A PASS from an earlier invocation is not current evidence.
 `gate-evidence-test.py` copies actual successful JSON/log evidence into isolated
 source trees, then runs bad-compiler and early-setup failures through the real
