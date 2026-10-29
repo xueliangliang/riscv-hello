@@ -576,3 +576,61 @@ test-lesson11-gdb:
 	+$(MAKE) --no-print-directory lesson11
 	$(PYTHON) lessons/11/gdb-runner-test.py
 	QEMU="$(QEMU)" $(PYTHON) lessons/11/gdb-test.py
+
+# Lesson12: independent runtime queue and persistent FlatFS fixture.
+REDO_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/12 -Ibuild/lesson12
+REDO_COMMON := build/lesson12/start.o build/lesson12/runtime.o build/lesson12/trap.o build/lesson12/fs.o build/lesson12/journal.o build/lesson02/uart.o
+build/lesson12:
+	mkdir -p $@
+build/lesson12/%.o: lessons/12/%.S | build/lesson12
+	$(CC) $(REDO_FLAGS) -c -o $@ $<
+build/lesson12/%.o: lessons/12/%.c $(wildcard lessons/12/*.h) | build/lesson12
+	$(CC) $(REDO_FLAGS) -c -o $@ $<
+build/lesson12/user.elf: build/lesson12/user-start.o build/lesson12/user.o build/lesson12/filetest.o build/lesson12/syscall.o lessons/12/user.ld
+	$(CC) $(REDO_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/12/user.ld -o $@ $(filter %.o,$^)
+build/lesson12/user-symbols.h: build/lesson12/user.elf lessons/12/symbols.py
+	$(PYTHON) lessons/12/symbols.py $(CROSS_COMPILE)nm $< $@
+build/lesson12/kernel.o: build/lesson12/user-symbols.h
+build/lesson12/kernel.elf: $(REDO_COMMON) build/lesson12/block.o build/lesson12/kernel.o lessons/12/kernel.ld
+	$(CC) $(REDO_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/12/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson12/block-no-flush.o: lessons/12/block.c lessons/12/block.h | build/lesson12
+	$(CC) $(REDO_FLAGS) -DNO_FLUSH -c -o $@ $<
+build/lesson12/kernel-no-flush.elf: $(REDO_COMMON) build/lesson12/block-no-flush.o build/lesson12/kernel.o lessons/12/kernel.ld
+	$(CC) $(REDO_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/12/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson12/bootloader.elf: build/lesson12/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(REDO_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+build/lesson12/%.bin: build/lesson12/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+build/lesson12/disk.img: build/lesson12/kernel.bin build/lesson12/user.bin tools/make-disk-image.py lessons/12/format.py
+	$(PYTHON) lessons/12/format.py build/lesson12/kernel.bin build/lesson12/user.bin $@
+build/lesson12/disk-no-flush.img: build/lesson12/kernel-no-flush.bin build/lesson12/user.bin tools/make-disk-image.py lessons/12/format.py
+	$(PYTHON) lessons/12/format.py build/lesson12/kernel-no-flush.bin build/lesson12/user.bin $@
+.PHONY: lesson12 run-lesson12 reset-lesson12 test-lesson12 inspect-lesson12
+lesson12: build/lesson12/bootloader.elf build/lesson12/disk.img
+all: lesson12
+run-lesson12: lesson12
+	QEMU="$(QEMU)" $(PYTHON) lessons/12/run.py $(LESSON12_ARGS)
+reset-lesson12: lesson12
+	$(PYTHON) lessons/12/run.py --reset
+# --reset is explicit destructive replacement, protected by the same host lock.
+test-lesson12:
+	@mkdir -p build/lesson12
+	$(PYTHON) lessons/12/fresh-log.py build/lesson12/results.json
+	+$(MAKE) --no-print-directory lesson12 build/lesson12/disk-no-flush.img
+	QEMU="$(QEMU)" $(PYTHON) lessons/12/test.py
+test: test-lesson12
+inspect-lesson12: build/lesson12/bootloader.elf build/lesson12/kernel.elf build/lesson12/user.elf
+	$(READELF) -h -lW $^
+	$(OBJDUMP) -d $^
+inspect: inspect-lesson12
+
+.PHONY: test-lesson12-gdb
+# Truncate before building: neither a build failure nor a runner failure may
+# leave the previous run's PASS behind.
+test-lesson12-gdb:
+	@mkdir -p build/lesson12
+	$(PYTHON) lessons/12/fresh-log.py build/lesson12/gdb-flush.log
+	+$(MAKE) --no-print-directory lesson12
+	$(PYTHON) lessons/12/gdb-runner-test.py
+	QEMU="$(QEMU)" $(PYTHON) lessons/12/gdb-test.py
