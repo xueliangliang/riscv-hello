@@ -577,7 +577,7 @@ test-lesson11-gdb:
 	$(PYTHON) lessons/11/gdb-runner-test.py
 	QEMU="$(QEMU)" $(PYTHON) lessons/11/gdb-test.py
 
-# Lesson12: independent runtime queue and persistent FlatFS fixture.
+# Lesson12: bounded full-data redo journal over the B+ tree filesystem.
 REDO_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/12 -Ibuild/lesson12
 REDO_COMMON := build/lesson12/start.o build/lesson12/runtime.o build/lesson12/trap.o build/lesson12/fs.o build/lesson12/journal.o build/lesson02/uart.o
 build/lesson12:
@@ -615,10 +615,7 @@ reset-lesson12: lesson12
 	$(PYTHON) lessons/12/run.py --reset
 # --reset is explicit destructive replacement, protected by the same host lock.
 test-lesson12:
-	@mkdir -p build/lesson12
-	$(PYTHON) lessons/12/fresh-log.py build/lesson12/results.json
-	+$(MAKE) --no-print-directory lesson12 build/lesson12/disk-no-flush.img
-	QEMU="$(QEMU)" $(PYTHON) lessons/12/test.py
+	QEMU="$(QEMU)" CC="$(CC)" OBJCOPY="$(OBJCOPY)" $(PYTHON) lessons/12/gate.py
 test: test-lesson12
 inspect-lesson12: build/lesson12/bootloader.elf build/lesson12/kernel.elf build/lesson12/user.elf
 	$(READELF) -h -lW $^

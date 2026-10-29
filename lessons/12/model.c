@@ -17,9 +17,13 @@ static int fault_type = -1;
 static long fault_sector = -1;
 static unsigned fault_occurrence;
 static int persist_error;
+/* Bounded evidence must never silently discard a late write. The host checks
+ * overflow after every native call, not only when inspecting a successful run. */
+#define TRACE_CAPACITY 262144U
 static unsigned trace_count;
-static unsigned trace_type[32768];
-static unsigned trace_sector[32768];
+static unsigned trace_overflow;
+static unsigned trace_type[TRACE_CAPACITY];
+static unsigned trace_sector[TRACE_CAPACITY];
 unsigned long block_reads, block_writes, block_flushes;
 extern long workload(unsigned operation);
 void uart_puts(const char *s)
@@ -41,6 +45,7 @@ void model_load(const void *bytes)
     crash_phase = 0;
     fault_type = -1;
     trace_count = 0;
+    trace_overflow = 0;
 }
 void model_disk(void *bytes)
 {
@@ -64,6 +69,18 @@ void model_fault(int type, long sector, unsigned occurrence, int persisted)
     fault_occurrence = occurrence;
     persist_error = persisted;
 }
+unsigned model_trace_count(void)
+{
+    return trace_count;
+}
+unsigned model_trace_overflow(void)
+{
+    return trace_overflow;
+}
+unsigned model_trace_capacity(void)
+{
+    return TRACE_CAPACITY;
+}
 unsigned model_trace(unsigned index, int sector)
 {
     if (index >= trace_count) {
@@ -73,10 +90,12 @@ unsigned model_trace(unsigned index, int sector)
 }
 int block_request(unsigned type, uint64_t sector, void *buffer)
 {
-    if (trace_count < 32768) {
+    if (trace_count < TRACE_CAPACITY) {
         trace_type[trace_count] = type;
         trace_sector[trace_count] = sector;
         trace_count++;
+    } else {
+        trace_overflow = 1;
     }
     if ((type != 4 && sector >= 16384) || (type != 0 && type != 1 && type != 4)) {
         return -1;

@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The cumulative repository contains eleven experiments:
+The cumulative repository contains twelve experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -72,7 +72,7 @@ See the chapter README for ABI, scope, direct QEMU commands and log oracles.
 Run `make lesson04` / `make test-lesson04`, `make lesson05` /
 `make test-lesson05`, or `make lesson06` / `make test-lesson06` for earlier steps;
 full `make test` keeps all earlier regressions. Guest logs are under
-`build/lesson04/` through `build/lesson11/`.
+`build/lesson04/` through `build/lesson12/`.
 Run `make run-lesson09` for the persistent shell; only `shutdown` exits it.
 `make test-lesson09` drives real serial PTY commands, cursor/history/Tab edits,
 owned wait/reap, slot exhaustion and RX overflow recovery. Optional
@@ -109,3 +109,21 @@ PASS: disk boot handoff works and a bad boot record is rejected.
 Use `make lesson02` or `make lesson03` to build a lesson's artifacts. Generated
 files stay under `build/` and are ignored by Git. Each lesson's ELF is for
 inspection/debugging; its `.bin` file is a raw byte dump without ELF metadata.
+
+## Lesson 12 — Bounded full-data redo journal
+
+[Lesson12](lessons/12/README.md) adds 1024 deduplicated sector after-images,
+read-your-writes, ordered device FLUSH and validated cold replay over the B+
+tree filesystem. Each mutator API is atomic, not an entire shell command.
+Oversized operations fail atomically with `F_LIMIT=-17`; device errors are
+sticky and may already have persisted, requiring recovery. The native actual-C
+volatile/durable model and independent raw decoder complement 64 QEMU software
+interruption boundaries and real dual-hart U-shell cold replay; these are not
+real-board power-cut guarantees. Lessons01–11 remain unchanged.
+
+Run `make run-lesson12`, `make test-lesson12`, `make inspect-lesson12` or optional
+`make test-lesson12-gdb`; cumulative `make all test inspect` includes lesson12.
+The ignored `state/lesson12/disk.img` is copied once and survives builds/clean.
+**`make reset-lesson12` destroys saved lesson12 files.** BPTFS11 images are
+rejected without modification, not automatically migrated. See the lesson's
+[format contract](lessons/12/FORMAT.md) for layout, capacity and error uncertainty.

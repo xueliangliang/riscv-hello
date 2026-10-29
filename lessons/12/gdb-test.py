@@ -81,34 +81,76 @@ set confirm off
 set remotetimeout 10
 file build/lesson12/kernel.elf
 target remote 127.0.0.1:{port}
-break block_completion_observed if request_header.type == 4
-continue
 python
 import gdb
 def integer(expr):
     return int(gdb.parse_and_eval(expr))
-assert integer('request_header.type') == 4
-assert integer('request_header.reserved') == 0
-assert integer('request_header.sector') == 0
-assert integer('descriptors[0].address') == integer('&request_header')
-assert integer('descriptors[0].length') == 16
-assert integer('descriptors[0].flags') == 1
-assert integer('descriptors[0].next') == 2
-assert integer('descriptors[2].length') == 1
-assert integer('descriptors[2].flags') == 2
-assert integer('descriptors[2].next') == 0
-assert integer('descriptors[2].address') == integer('&request_status')
-assert integer('request_status') == 0
-assert integer('used_ring.index') == integer('last_used_index')
-assert integer('used_ring.ring[(last_used_index - 1) % 8].id') == 0
-assert integer('used_ring.ring[(last_used_index - 1) % 8].length') == 1
-print('PASS GDB: actual FLUSH type4 header16 -> status1, no data, used id0 length1 status0')
+events = []
+phases = []
+recording = False
+failure = None
+class Completion(gdb.Breakpoint):
+    def stop(self):
+        global recording, failure
+        try:
+            kind = integer('request_header.type')
+            sector = integer('request_header.sector')
+            if kind == 1 and sector == 12305:
+                recording = True
+            if not recording:
+                return False
+            assert integer('request_status') == 0
+            events.append((kind, sector))
+            if kind == 4:
+                assert integer('request_header.reserved') == 0 and sector == 0
+                assert integer('descriptors[0].address') == integer('&request_header')
+                assert integer('descriptors[0].length') == 16
+                assert integer('descriptors[0].flags') == 1
+                assert integer('descriptors[0].next') == 2
+                assert integer('descriptors[2].length') == 1
+                assert integer('descriptors[2].flags') == 2
+                assert integer('descriptors[2].next') == 0
+                assert integer('descriptors[2].address') == integer('&request_status')
+                assert integer('used_ring.index') == integer('last_used_index')
+                assert integer('used_ring.ring[(last_used_index - 1) % 8].id') == 0
+                assert integer('used_ring.ring[(last_used_index - 1) % 8].length') == 1
+            return False
+        except Exception as error:
+            failure = error
+            return True
+class Phase(gdb.Breakpoint):
+    def stop(self):
+        global failure
+        try:
+            phase = integer('phase')
+            if not phases or phases[-1] != phase:
+                phases.append(phase)
+            if phase != 8:
+                return False
+            count = integer("'lessons/12/journal.c'::count")
+            targets = [integer("'lessons/12/journal.c'::targets[%d]" % i) for i in range(count)]
+            expected = [(1, 12305 + i) for i in range(count)]
+            expected += [(1, 12289 + i) for i in range(16)]
+            expected += [(4, 0), (1, 12288), (4, 0)]
+            expected += [(1, target) for target in targets]
+            expected += [(4, 0), (1, 12288), (4, 0)]
+            assert events == expected, (events, expected)
+            assert phases == list(range(1, 9)), phases
+            print('PASS GDB: actual FLUSH type4 header16 -> status1, no data, used id0 length1 status0')
+            print('PASS GDB: descriptor+images FLUSH commit FLUSH all checkpoint homes FLUSH clear FLUSH')
+            print('observed request sequence:', events)
+            return True
+        except Exception as error:
+            failure = error
+            return True
+Completion('block_completion_observed')
+Phase('journal_hook')
 end
-print request_header
-print descriptors[0]
-print descriptors[2]
-print used_ring
-print request_status
+continue
+python
+assert failure is None, failure
+assert phases == list(range(1, 9)), phases
+end
 detach
 quit
 """)

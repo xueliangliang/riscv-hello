@@ -332,6 +332,29 @@ static void epoch_test(int phase)
 }
 void file_test(int verify)
 {
+    if (verify == 8) {
+        long h = file_open("alpha", FS_EXISTING);
+        require(h >= 4, "FAIL replay open\n");
+        unsigned offset = 0;
+        while (offset < 8996) {
+            unsigned count = 8996 - offset;
+            if (count > sizeof(buffer)) {
+                count = sizeof(buffer);
+            }
+            require(file_read(h, buffer, count) == count, "FAIL replay read length\n");
+            for (unsigned i = 0; i < count; i++) {
+                unsigned position = offset + i;
+                unsigned char expected = position < 4900 ? 'A' :
+                    ((position - 4900) * 37U + 19U) & 255U;
+                require(buffer[i] == expected, "FAIL replay payload\n");
+            }
+            offset += count;
+        }
+        require(file_read(h, buffer, 1) == 0, "FAIL replay EOF\n");
+        close_checked(h);
+        say("PASS replay exact binary bytes and EOF\n");
+        return;
+    }
     if (verify >= 5) {
         epoch_test(verify);
         return;

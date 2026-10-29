@@ -1001,6 +1001,9 @@ static long transaction_end(long result)
 }
 long fs_open(const char *name, unsigned mode)
 {
+    if (!healthy) {
+        return mutate_open(name, mode);
+    }
     if (transaction_begin()) {
         return F_IO;
     }
@@ -1008,6 +1011,9 @@ long fs_open(const char *name, unsigned mode)
 }
 long fs_write(long token, const void *buffer, unsigned count)
 {
+    if (!healthy) {
+        return mutate_write(token, buffer, count);
+    }
     if (transaction_begin()) {
         return F_IO;
     }
@@ -1015,6 +1021,9 @@ long fs_write(long token, const void *buffer, unsigned count)
 }
 long fs_append(long token, const void *buffer, unsigned count)
 {
+    if (!healthy) {
+        return mutate_append(token, buffer, count);
+    }
     if (transaction_begin()) {
         return F_IO;
     }
@@ -1022,6 +1031,9 @@ long fs_append(long token, const void *buffer, unsigned count)
 }
 long fs_truncate(long token, unsigned size)
 {
+    if (!healthy) {
+        return mutate_truncate(token, size);
+    }
     if (transaction_begin()) {
         return F_IO;
     }
@@ -1029,6 +1041,9 @@ long fs_truncate(long token, unsigned size)
 }
 long fs_remove(const char *name)
 {
+    if (!healthy) {
+        return mutate_remove(name);
+    }
     if (transaction_begin()) {
         return F_IO;
     }
@@ -1036,6 +1051,9 @@ long fs_remove(const char *name)
 }
 long fs_defrag(void)
 {
+    if (!healthy) {
+        return mutate_defrag();
+    }
     if (transaction_begin()) {
         return F_IO;
     }

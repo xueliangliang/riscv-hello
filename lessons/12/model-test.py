@@ -27,7 +27,7 @@ def contents(raw):
 
 def logged(raw):
     header = raw[H * 512:(H + 1) * 512]
-    assert header[:8] == b'REDO12\0\0'
+    assert header[:8] == b'REDO12\0\0', 'committed journal header missing'
     fields = struct.unpack_from('<8I', header, 8)
     version, sector, capacity, count, crc, size, start, images = fields
     assert (version, sector, capacity, size, start, images) == (1, 512, 1024, 16384, H, I)
@@ -60,16 +60,60 @@ class Model:
                    'lessons/12/model.c', '-o', str(BUILD / 'model.so')]
         subprocess.run(command, check=True)
         self.c = C.CDLL(str((BUILD / 'model.so').resolve()))
-        for name in ['fs_open', 'fs_read', 'fs_write', 'fs_append', 'fs_truncate', 'fs_close',
-                     'fs_remove', 'fs_seek', 'fs_defrag', 'model_run']:
-            getattr(self.c, name).restype = C.c_long
-        self.c.fs_open.argtypes = [C.c_char_p, C.c_uint]
-        self.c.fs_write.argtypes = [C.c_long, C.c_void_p, C.c_uint]
-        self.c.fs_append.argtypes = [C.c_long, C.c_void_p, C.c_uint]
-        self.c.fs_read.argtypes = [C.c_long, C.c_void_p, C.c_uint]
-        self.c.fs_remove.argtypes = [C.c_char_p]
-        self.c.model_fault.argtypes = [C.c_int, C.c_long, C.c_uint, C.c_int]
+        # Declare both halves of every exposed native ABI. ctypes otherwise
+        # silently returns signed int (UINT_MAX becomes -1) and narrows longs.
+        signatures = {
+            'model_load': (None, [C.c_void_p]),
+            'model_disk': (None, [C.c_void_p]),
+            'model_cut': (None, []),
+            'model_crash': (None, [C.c_uint, C.c_uint]),
+            'model_fault': (None, [C.c_int, C.c_long, C.c_uint, C.c_int]),
+            'model_run': (C.c_long, [C.c_uint]),
+            'model_trace': (C.c_uint, [C.c_uint, C.c_int]),
+            'model_trace_count': (C.c_uint, []),
+            'model_trace_overflow': (C.c_uint, []),
+            'model_trace_capacity': (C.c_uint, []),
+            'fs_mount': (C.c_int, []), 'fs_sync': (C.c_int, []),
+            'fs_open': (C.c_long, [C.c_char_p, C.c_uint]),
+            'fs_read': (C.c_long, [C.c_long, C.c_void_p, C.c_uint]),
+            'fs_write': (C.c_long, [C.c_long, C.c_void_p, C.c_uint]),
+            'fs_append': (C.c_long, [C.c_long, C.c_void_p, C.c_uint]),
+            'fs_seek': (C.c_long, [C.c_long, C.c_uint]),
+            'fs_truncate': (C.c_long, [C.c_long, C.c_uint]),
+            'fs_flush': (C.c_long, [C.c_long]),
+            'fs_close': (C.c_long, [C.c_long]),
+            'fs_remove': (C.c_long, [C.c_char_p]),
+            'fs_list_page': (C.c_long, [C.c_void_p, C.c_uint, C.c_void_p]),
+            'fs_defrag': (C.c_long, []), 'fs_info': (None, []),
+            'journal_crc': (C.c_uint, [C.c_void_p, C.c_uint]),
+            'journal_identity': (C.c_int, [C.c_void_p]),
+            'journal_recover': (C.c_int, []),
+            'journal_begin': (C.c_int, []), 'journal_abort': (None, []),
+            'journal_io': (C.c_int, [C.c_uint, C.c_uint, C.c_void_p]),
+            'journal_commit': (C.c_int, []), 'journal_error': (C.c_int, []),
+            'journal_hook': (None, [C.c_uint, C.c_uint]),
+            'block_init': (C.c_int, []),
+            'block_request': (C.c_int, [C.c_uint, C.c_uint64, C.c_void_p]),
+            'workload': (C.c_long, [C.c_uint]),
+            'uart_puts': (None, [C.c_char_p]),
+            'print_hex': (None, [C.c_uint64]),
+        }
+        for name, (result, arguments) in signatures.items():
+            function = getattr(self.c, name)
+            function.restype = result
+            function.argtypes = arguments
+        for name in signatures:
+            if not name.startswith('model_trace'):
+                getattr(self.c, name).errcheck = self.check_trace
         self.buffer = C.create_string_buffer(SIZE)
+
+    def check_trace(self, result, function, arguments):
+        assert not self.c.model_trace_overflow(), 'native IO trace overflow: evidence incomplete'
+        return result
+
+    def trace(self):
+        self.check_trace(None, None, None)
+        return [self.c.model_trace(n, 0) for n in range(self.c.model_trace_count())]
 
     def load(self, raw):
         self.c.model_load(C.c_char_p(raw))
@@ -123,8 +167,43 @@ def expected(operation, before):
     return value
 
 
+def trace_contract(m):
+    """Fail-first ABI and bounded-evidence regressions using real native IO."""
+    raw = (BUILD / 'disk.img').read_bytes()
+    m.load(raw)
+    # Reproduce the original ctypes default, independently of the typed handle.
+    old = C.CDLL(str((BUILD / 'model.so').resolve()))
+    assert old.model_trace(0, 0) == -1
+    assert m.c.model_trace(0, 0) == 0xffffffff, 'unsigned trace ABI mismatch'
+    sector = C.create_string_buffer(512)
+    for _ in range(32769):
+        assert m.c.block_request(0, 2048, sector) == 0
+    assert m.c.block_request(1, 2048, sector) == 0
+    assert m.trace()[-1] == 1 and m.c.model_trace_count() == 32770
+    capacity = m.c.model_trace_capacity()
+    for _ in range(capacity - m.c.model_trace_count()):
+        assert m.c.block_request(0, 2048, sector) == 0
+    try:
+        m.c.block_request(1, 2048, sector)
+    except AssertionError as error:
+        assert 'trace overflow' in str(error)
+    else:
+        raise AssertionError('native call accepted saturated trace')
+    try:
+        m.trace()
+    except AssertionError as error:
+        assert 'trace overflow' in str(error)
+    else:
+        raise AssertionError('oracle accepted incomplete evidence')
+    m.load(raw)
+    assert m.trace() == []
+    return {'unsigned_sentinel': True, 'late_write_after_32768': True,
+            'overflow_rejected_by_call_and_oracle': True, 'capacity': capacity}
+
+
 def run_model():
     m = Model()
+    trace_evidence = trace_contract(m)
     base = m.baseline()
     (BUILD / 'baseline.img').write_bytes(base)
     protected = base[:257 * 512]
@@ -204,6 +283,25 @@ def run_model():
     m.mount()
     verify(m.disk(), references[2], 'interrupted native replay')
 
+    # Recovery errors also have persisted/nonpersisted legal outcomes. Home
+    # may be partly checkpointed; the next complete mount must still yield POST.
+    recovery_cases = []
+    for kind, typ, sector, occurrence in [
+        ('replay-home-write', 1, 513, 1), ('replay-home-flush', 4, -1, 1),
+        ('replay-clear-write', 1, H, 1), ('replay-clear-flush', 4, -1, 2)]:
+        for persisted in (0, 1):
+            m.load(committed)
+            m.c.model_fault(typ, sector, occurrence, persisted)
+            assert m.c.model_run(0) < 0, (kind, persisted)
+            m.c.model_cut()
+            m.mount()
+            verify(m.disk(), references[2], kind)
+            stable = m.disk()
+            m.c.model_cut()
+            m.mount()
+            assert m.disk() == stable
+            recovery_cases.append({'error': kind, 'persisted': persisted, 'expected': 'POST'})
+
     # CRC-correct malicious target records still reject before any writes.
     mutations = {}
     for label, location in [('header-crc', H * 512 + 508), ('payload-crc', I * 512 + 20),
@@ -231,9 +329,41 @@ def run_model():
         m.load(bytes(raw))
         assert m.c.model_run(0) < 0, label
         assert m.disk() == raw, label + ' wrote durable bytes'
-        trace = [m.c.model_trace(n, 0) for n in range(32768)]
+        trace = m.trace()
         assert 1 not in trace and 4 not in trace, label + ' issued writes before validation'
         (BUILD / f'malformed-{label}.img').write_bytes(raw)
+
+    # 1024 means unique sectors, not number of journal_io calls. Exercise
+    # the real core directly without introducing a second journal algorithm.
+    m.load(base)
+    m.mount()
+    assert m.c.journal_begin() == 0
+    sector_buffer = C.create_string_buffer(b'X' * 512, 512)
+    readback = C.create_string_buffer(512)
+
+    for sector in range(2048, 3072):
+        assert m.c.journal_io(1, sector, sector_buffer) == 0
+    sector_buffer.raw = b'Y' * 512
+    for _ in range(1030):
+        assert m.c.journal_io(1, 2048, sector_buffer) == 0
+    assert m.c.journal_io(0, 2048, readback) == 0
+    assert readback.raw == b'Y' * 512
+    assert m.c.journal_io(1, 3072, sector_buffer) == -17
+    assert m.disk() == base
+    m.c.journal_abort()
+    trace_end = m.c.model_trace_count()
+    assert m.c.journal_begin() == 0
+    assert m.c.journal_commit() == 0
+    assert m.c.model_trace_count() == trace_end, 'empty transaction issued IO'
+    assert m.c.model_trace(trace_end, 0) == 0xffffffff, 'unsigned trace ABI mismatch'
+    assert m.disk() == base
+    for forbidden in (0, 511, 1027, 12000, H, 16384):
+        m.load(base)
+        m.mount()
+        assert m.c.journal_begin() == 0
+        assert m.c.journal_io(1, forbidden, sector_buffer) == -14
+        assert m.disk() == base
+        m.c.journal_abort()
 
     # Exact rollback on a real oversized defrag, including RAM cursors/epoch.
     m.load(base)
@@ -276,7 +406,10 @@ def run_model():
         pass
     else:
         raise AssertionError('oracle accepted changed payload')
-    result = {'status': 'PASS', 'cases': cases, 'case_count': len(cases),
+    result = {'status': 'PASS', 'trace_contract': trace_evidence,
+              'cases': cases, 'case_count': len(cases),
+              'recovery_errors': recovery_cases, 'recovery_error_count': len(recovery_cases),
+              'dedup_read_your_writes_1024_unique': True, 'empty_transaction_no_IO': True,
               'malformed_no_write': list(mutations), 'capacity': 'atomic -17, healthy afterward',
               'baseline_sha256': hashlib.sha256(base).hexdigest(),
               'baseline': report(inspect(base)), 'references': {str(k): report(inspect(v)) for k, v in references.items()}}
