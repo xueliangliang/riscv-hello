@@ -4,7 +4,7 @@
 static char history[HISTORY][LINE];
 static int history_count;
 static const char *commands[] = {
-    "help", "echo", "ps", "jobs", "run", "kill", "wait", "sleep", "stats", "shutdown", "ls", "fwrite", "cat", "rm", "fsinfo", "fstest", "fsverify", "fappend", "fseek", "ftruncate", "fread", "defrag", "fspressure"
+    "help", "echo", "ps", "jobs", "run", "kill", "wait", "sleep", "stats", "shutdown", "ls", "fwrite", "cat", "rm", "fsinfo", "fstest", "fsverify", "fappend", "fseek", "ftruncate", "fread", "defrag", "fspressure", "fsnodes"
 };
 static int length(const char *s)
 {
@@ -219,7 +219,10 @@ static void execute(char *line)
         return;
     }
     if (equal(line, "help")) {
-        say("help echo ps/jobs run spin|sleep|exit [arg] kill pid wait pid sleep ticks stats shutdown ls fwrite NAME TEXT cat NAME rm NAME fsinfo fstest fsverify fappend NAME TEXT fseek NAME OFFSET [TEXT] ftruncate NAME SIZE fread NAME defrag fspressure\n");
+        say("help echo ps/jobs run spin|sleep|exit [arg] kill pid wait pid sleep ticks stats shutdown\n");
+        say("ls fwrite NAME TEXT cat/fread NAME rm NAME fsinfo fappend NAME TEXT\n");
+        say("fseek NAME OFFSET [TEXT] ftruncate NAME SIZE defrag\n");
+        say("fstest [create|delete|recreate] fsverify fspressure fsnodes (fresh test disks only)\n");
     } else if (equal(line, "ls")) {
         struct FileEntry entries[7];
         struct ListCursor cursor = {0, 0};
@@ -247,11 +250,16 @@ static void execute(char *line)
     } else if (equal(line, "fsinfo")) {
         syscall2(FS_INFO, 0, 0);
     } else if (equal(line, "fstest") || equal(line, "fsverify")) {
-        file_test(equal(line, "fsverify"));
+        int phase = equal(line, "fsverify") ? 1 :
+                    equal(arg, "create") ? 2 : equal(arg, "delete") ? 3 :
+                    equal(arg, "recreate") ? 4 : 0;
+        file_test(phase);
     } else if (equal(line, "rm")) {
         result("rm", 0, file_remove(arg));
     } else if (equal(line, "defrag")) {
         result("defrag", 0, file_defrag());
+    } else if (equal(line, "fsnodes")) {
+        file_node_pressure();
     } else if (equal(line, "fspressure")) {
         file_pressure();
     } else if (equal(line, "fseek") || equal(line, "ftruncate")) {

@@ -1,7 +1,8 @@
 # BPTFS11 version 1
 
 Independent little-endian format, NOT compatible with FlatFS10 or prototype.
-512-byte sectors; 8 MiB image (16384 sectors). Boot LBAs 0–256 protected.
+512-byte sectors; exactly 8 MiB image/device (16384 sectors), otherwise rejected.
+Boot LBAs 0–256 protected.
 All integer fields u32 LE. IDs one-based, zero=null. Never autoformat.
 
 ## Disk layout

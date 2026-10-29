@@ -5,6 +5,7 @@
 long syscall3(long number, unsigned long first, unsigned long second, unsigned long third);
 void file_test(int verify);
 void file_pressure(void);
+void file_node_pressure(void);
 /* User API. Counts are checked in S, not silently narrowed in this wrapper. */
 long file_open(const char *name, unsigned long mode);
 long file_read(long handle, void *buffer, unsigned long count);

@@ -558,7 +558,7 @@ run-lesson11: lesson11
 reset-lesson11: lesson11
 	$(PYTHON) lessons/11/run.py --reset
 # --reset is explicit destructive replacement, protected by the same host lock.
-test-lesson11: lesson11 build/lesson11/disk-no-flush.img
+test-lesson11: lesson11 lesson10 build/lesson11/disk-no-flush.img
 	QEMU="$(QEMU)" $(PYTHON) lessons/11/test.py
 test: test-lesson11
 inspect-lesson11: build/lesson11/bootloader.elf build/lesson11/kernel.elf build/lesson11/user.elf

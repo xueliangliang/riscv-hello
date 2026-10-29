@@ -313,10 +313,15 @@ static long file_syscall(long number, unsigned long first, unsigned long second,
         if (first < third + sizeof(struct ListCursor) && third < first + bytes) {
             return E_ARG;
         }
-        struct ListCursor cursor = *(struct ListCursor *)third;
+        struct ListCursor cursor;
+        for (unsigned i = 0; i < sizeof(cursor); i++) {
+            ((unsigned char *)&cursor)[i] = ((const unsigned char *)third)[i];
+        }
         long result = fs_list_page((struct FileEntry *)first, second, &cursor);
         if (result >= 0) {
-            *(struct ListCursor *)third = cursor;
+            for (unsigned i = 0; i < sizeof(cursor); i++) {
+                ((unsigned char *)third)[i] = ((const unsigned char *)&cursor)[i];
+            }
         }
         return result;
     }

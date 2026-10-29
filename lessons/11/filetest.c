@@ -267,11 +267,27 @@ static void bad_arguments(void)
     require(h >= 4 && file_truncate(h, 8200) == 0, "FAIL cursor mutation\n");
     close_checked(h);
     require(file_list_page(listing, 1, &c) == F_ARG, "FAIL stale enumeration\n");
+    /* Byte-aligned user ABI: listing/cursor copy must not assume C alignment. */
+    for (unsigned i = 0; i < 8; i++) {
+        buffer[101 + i] = 0;
+    }
+    require(file_list_page((void *)(buffer + 1), 1, (void *)(buffer + 101)) == 1,
+            "FAIL unaligned listing/cursor\n");
+    require(buffer[1] == 'e' || buffer[1] == 'f', "FAIL unaligned listing bytes\n");
+    require(buffer[105] == 1, "FAIL unaligned cursor advance\n");
+    h = file_open("f000", FS_RW);
+    require(h >= 4 && file_seek(h, 9000) == 9000, "FAIL zero seek\n");
+    require(file_write(h, buffer, 0) == 0 && file_append(h, buffer, 0) == 0, "FAIL zero write\n");
+    require(file_read(h, buffer, 1) == 0, "FAIL zero write cursor\n");
+    close_checked(h);
+    create_pattern("1234567890123456789012345678901", 0, 0);
+    verify_pattern("1234567890123456789012345678901", 0, 0, 0);
+    require(file_remove("1234567890123456789012345678901") == 0, "FAIL name31 cleanup\n");
     say("fstest: owner names buffers handles reserved args PASS\n");
 }
 void file_test(int verify)
 {
-    if (!verify) {
+    if (!verify || verify == 2) {
         for (unsigned i = 0; i < 224; i++) {
             unsigned index = i < 80 ? i : i < 160 ? 239 - i : 160 + ((i - 160) * 17 % 64);
             char name[8];
@@ -282,6 +298,12 @@ void file_test(int verify)
         bad_arguments();
         edge_operations();
         create_pattern("max", 65536, 249);
+        if (verify == 2) {
+            say("fstest: create stage PASS\n");
+            return;
+        }
+    }
+    if (!verify || verify == 3) {
         for (unsigned i = 0; i < 224; i++) {
             if (i % 5 == 2) {
                 char name[8];
@@ -291,6 +313,11 @@ void file_test(int verify)
             }
         }
         say("fstest: deleted middle data blocks PASS\n");
+        if (verify == 3) {
+            return;
+        }
+    }
+    if (!verify || verify == 4) {
         for (unsigned i = 2; i < 224; i += 10) {
             char name[8];
             name_for(name, i);
@@ -345,4 +372,57 @@ void file_pressure(void)
     create_pattern("f030", 65536, 245);
     verify_pattern("f030", 65536, 245, 0);
     say("fspressure: 512 files 1024 blocks preflight reuse PASS\n");
+}
+
+static void node_name(char *name, unsigned round, unsigned index)
+{
+    name[0] = 'n';
+    name[1] = '0' + round / 100;
+    name[2] = '0' + round / 10 % 10;
+    name[3] = '0' + round % 10;
+    name[4] = '0' + index / 10;
+    name[5] = '0' + index % 10;
+    name[6] = 0;
+}
+void file_node_pressure(void)
+{
+    for (unsigned round = 0; round < 256; round++) {
+        for (unsigned index = 0; index < 16; index++) {
+            char name[8];
+            node_name(name, round, index);
+            long h = file_open(name, FS_REPLACE);
+            if (h == F_FULL) {
+                require(file_open(name, FS_EXISTING) == F_MISSING, "FAIL node capacity mutated\n");
+                require(file_open(name, FS_REPLACE) == F_FULL, "FAIL node capacity unstable\n");
+                /* Distinct name that fits a retained empty leaf proves a full
+                   node pool does not make every non-splitting insert fail. */
+                h = file_open("a", FS_REPLACE);
+                require(h >= 4, "FAIL retained leaf reuse\n");
+                close_checked(h);
+                require(file_remove("a") == 0, "FAIL retained leaf cleanup\n");
+                for (unsigned j = 0; j < index; j++) {
+                    node_name(name, round, j);
+                    h = file_open(name, FS_EXISTING);
+                    require(h >= 4 && file_read(h, buffer, 1) == 0, "FAIL node full old lookup\n");
+                    close_checked(h);
+                }
+                char message[] = "fsnodes: stop 000 00 PASS\n";
+                message[14] = '0' + round / 100;
+                message[15] = '0' + round / 10 % 10;
+                message[16] = '0' + round % 10;
+                message[18] = '0' + index / 10;
+                message[19] = '0' + index % 10;
+                say(message);
+                return;
+            }
+            require(h >= 4, "FAIL node pressure create\n");
+            close_checked(h);
+        }
+        for (unsigned index = 0; index < 16; index++) {
+            char name[8];
+            node_name(name, round, index);
+            require(file_remove(name) == 0, "FAIL node pressure delete\n");
+        }
+    }
+    require(0, "FAIL node exhaustion not reached\n");
 }

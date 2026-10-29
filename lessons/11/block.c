@@ -238,7 +238,7 @@ int block_init(void)
     device_capacity = ((uint64_t)capacity_high << 32) | capacity_low;
     last_used_index = used_ring.index;
 
-    if (read_register(0xfc) != config_generation || device_capacity < 4096U) {
+    if (read_register(0xfc) != config_generation || device_capacity != 16384U) {
         return fail_device(-35);
     }
 

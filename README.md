@@ -5,7 +5,7 @@ stays separate as reference material. Each lesson adds one reviewable step;
 annotated tags such as `lesson-01`, `lesson-02`, and `lesson-03` pin the exact
 state used by the matching blog post.
 
-The cumulative repository contains ten experiments:
+The cumulative repository contains eleven experiments:
 
 - Lesson 01 builds a freestanding RV64 ELF and reaches `_start` on QEMU `virt`.
   The guest writes directly to UART and exits through QEMU's test device.
@@ -54,7 +54,16 @@ The cumulative repository contains ten experiments:
   Run `make run-lesson10`, `make test-lesson10`, or optional
   `make test-lesson10-gdb`. **`make reset-lesson10` destroys saved files.**
 
-Lessons01–09 remain unchanged. There is still no address-space isolation:
+- [Lesson 11 — 有边界的 B+ 树文件系统](lessons/11/README.md)
+  adds an independent little-endian B+ tree backend with real multilevel splits,
+  separate node/data bitmaps, chained payload, bounded U-mode paged listing,
+  seek/append/truncate, deletion/reuse and actual data-block defragmentation.
+  Independent raw decoding and repeated writable-image cold boots verify contents.
+  Run `make run-lesson11`, `make test-lesson11`, or optional
+  `make test-lesson11-gdb`. **`make reset-lesson11` destroys saved lesson11 files.**
+  No journal, directories, full deletion rebalancing or production guarantees.
+
+Lessons01–10 remain unchanged by lesson11. There is still no address-space isolation:
 PMP grants flat physical access and there are no page tables.
 Lesson07 owns its scheduler/runtime and keeps lesson03's real disk boot chain.
 Run `make lesson07` / `make test-lesson07`; optional `make test-lesson07-gdb`
@@ -63,7 +72,7 @@ See the chapter README for ABI, scope, direct QEMU commands and log oracles.
 Run `make lesson04` / `make test-lesson04`, `make lesson05` /
 `make test-lesson05`, or `make lesson06` / `make test-lesson06` for earlier steps;
 full `make test` keeps all earlier regressions. Guest logs are under
-`build/lesson04/` through `build/lesson10/`.
+`build/lesson04/` through `build/lesson11/`.
 Run `make run-lesson09` for the persistent shell; only `shutdown` exits it.
 `make test-lesson09` drives real serial PTY commands, cursor/history/Tab edits,
 owned wait/reap, slot exhaustion and RX overflow recovery. Optional

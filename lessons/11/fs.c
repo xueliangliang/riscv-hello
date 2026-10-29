@@ -9,6 +9,12 @@
 #define PAYLOAD 4092U
 #define DATA_LBA 2048U
 #define DEPTH 8U
+_Static_assert(257 <= 512, "boot records overlap filesystem");
+_Static_assert(515 + NODES <= DATA_LBA, "node pages overlap data pool");
+_Static_assert(DATA_LBA + BLOCKS * 8 <= 16384, "data pool exceeds image");
+_Static_assert((FS_BYTES + PAYLOAD - 1) / PAYLOAD <= 17, "chain cache too small");
+_Static_assert(sizeof(struct FileEntry) == 36, "listing ABI size");
+_Static_assert(sizeof(struct ListCursor) == 8, "cursor ABI size");
 static unsigned char super[512];
 static unsigned char node_bits[512];
 static unsigned char data_bits[512];
@@ -835,8 +841,9 @@ long fs_list_page(struct FileEntry *out, unsigned capacity, struct ListCursor *c
             if (skip) {
                 skip--;
             } else {
-                copy(out[count].name, entry(p, i), 32);
-                out[count].size = get32(entry(p, i) + 32);
+                unsigned char *destination = (unsigned char *)out + count * sizeof(*out);
+                copy(destination, entry(p, i), 32);
+                put32(destination + 32, get32(entry(p, i) + 32));
                 count++;
             }
         }
