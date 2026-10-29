@@ -23,7 +23,9 @@ make test-lesson11-gdb
 `build/lesson11/disk.img` 是可重复构建的 8 MiB fixture；默认运行盘是
 `state/lesson11/disk.img`。构建及 `make clean` 不改保存盘。启动器对复制、
 重置及整个 VM 生命周期持有同一非阻塞主机锁，暂存文件 fsync 后原子安装。
-已有错误格式磁盘被拒绝，不格式化、不迁移。直接执行 QEMU 会绕过启动器锁。
+已有错误格式磁盘被拒绝，不格式化、不迁移。保存盘也保留原 boot/kernel/U
+payload，重编译不会自动升级其中的程序；要运行新版请另选一个 fresh `--disk`，
+或在确认可丢弃数据后明确 reset。直接执行 QEMU 会绕过启动器锁。
 fixture 不是已挂载用户数据的备份；不要用 format.py 修复保存盘。
 
 唯一 `-kernel` 是双 hart 过滤启动 wrapper + 第 03 课未修改的 C loader；

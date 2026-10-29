@@ -162,17 +162,32 @@ from scenarios import run_scenarios, malformed, negative, pressure, node_pressur
 
 def io_errors(directory):
     # Real QEMU blkdebug EIO -> device status=IOERR, not a pretend C return.
-    for kind, event, sector in [("read", "read_aio", 512), ("write", "write_aio", 515), ("flush", "flush_to_disk", None)]:
+    for kind, event, sector in [("read", "read_aio", 512),
+                                ("read-data", "read_aio", 2048),
+                                ("write-metadata", "write_aio", 515),
+                                ("write-data", "write_aio", 2048),
+                                ("flush", "flush_to_disk", None)]:
         disk = directory / f"io-{kind}.img"
         shutil.copyfile("build/lesson11/disk.img", disk)
+        if kind == "read-data":
+            # A read_aio injection on an empty image can hit the host's RMW
+            # read while servicing a guest WRITE. Seed via real U calls first,
+            # then fault mount's payload validation READ in a fresh VM.
+            seed = Guest("io-read-data-seed.log", str(disk))
+            try:
+                seed.until("11> ")
+                seed.cmd("fwrite seeded payload", "fwrite target=0 result=7")
+                seed.shutdown()
+            finally:
+                seed.close()
         config = directory / f"{kind}.conf"
         text = f'[inject-error]\nevent = "{event}"\nerrno = "5"\nonce = "on"\n'
         if sector is not None:
             text += f'sector = "{sector}"\n'
         config.write_text(text)
         opts = command(f"blkdebug:{config}:{disk}", device_extra=",werror=report,rerror=report")
-        if kind == "read":
-            log = negative(Guest, "io-read", disk, opts)
+        if kind in ("read", "read-data"):
+            log = negative(Guest, "io-" + kind, disk, opts)
             # Mount rejection alone is not enough: the driver must have seen
             # the device's actual IOERR status byte on the type0 READ request.
             failure = re.search(rb"block: fail-closed code=0x[0-9a-f]{16} "
@@ -187,7 +202,8 @@ def io_errors(directory):
             g.cmd("fwrite cannot succeed", "fwrite target=0 result=-14")
             assert stats(g.cmd("fsinfo"))["healthy"] == 0
             assert b"status=0x0000000000000001" in g.all, "missing actual device IOERR status"
-            assert f"request-type=0x{(1 if kind == 'write' else 4):016x}".encode() in g.all
+            request_type = 1 if kind.startswith('write-') else 4
+            assert f"request-type=0x{request_type:016x}".encode() in g.all
             g.shutdown(failure=True)
             assert b"FAIL: shutdown FLUSH failed" in g.all
             assert b"shutdown: explicit user request" not in g.all
@@ -220,14 +236,16 @@ def main():
             image[:257 * 512] = fixtures[0].read_bytes()[:257 * 512]
             disk = directory / 'flat10-with-bpt11-kernel.img'
             disk.write_bytes(image)
-            negative(Guest, 'bpt11-rejects-flat10', disk)
+            log = negative(Guest, 'bpt11-rejects-flat10', disk)
+            assert b'Lesson 11:' in log and b'Lesson 10:' not in log
             image = bytearray(fixtures[0].read_bytes())
             image[:257 * 512] = flat[:257 * 512]
             disk = directory / 'bpt11-with-flat10-kernel.img'
             disk.write_bytes(image)
             opts = command(str(disk))
             opts[opts.index('-kernel') + 1] = 'build/lesson10/bootloader.elf'
-            negative(Guest, 'flat10-rejects-bpt11', disk, opts)
+            log = negative(Guest, 'flat10-rejects-bpt11', disk, opts)
+            assert b'Lesson 10:' in log and b'Lesson 11:' not in log
             # A truncated or oversized device must not be admitted even if
             # metadata would otherwise fit/read successfully.
             for name, length in [('short-device', 6 * 1024 * 1024), ('large-device', 9 * 1024 * 1024)]:
@@ -244,7 +262,7 @@ def main():
                                  'ordered_files': len(trees['recreate']['files']), 'malformed_images': malformed_count,
                                  'mass_image_cold_boots': len(trees), 'pressure_files': len(pressure_tree['files']),
                                  'pressure_blocks': pressure_tree['used_blocks'], 'node_pressure_nodes': len(node_tree['nodes']),
-                                 'real_blkdebug_errors': ['read', 'write', 'flush']}, indent=2) + '\n')
+                                 'real_blkdebug_errors': ['read-metadata', 'read-data', 'write-metadata', 'write-data', 'flush']}, indent=2) + '\n')
     print('PASS lesson11: real U APIs; multilevel B+ splits; ordered pages; chains/seek/append/truncate; delete/reuse/real defrag; independent raw/cold boots; full capacity; corruption/device errors')
 
 
