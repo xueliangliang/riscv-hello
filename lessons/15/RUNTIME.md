@@ -16,7 +16,10 @@ string base=53248, API version=1, three reserved zero words. Table entries are
 u32 target offset + u32 signature. Exact ordered API/signature definitions live
 in runtime-api.h; function targets must be aligned and inside function region,
 not metadata, table, rodata or padding. Runtime BSS starts at 80510000 and ends
-below80600000. The linked map, packer, compiler, kernel and runtime check these
+below80600000. The integer-output API takes an explicit0/1 newline flag; print_int and
+print_bits each send one complete bounded line in a single WRITE. printf
+uses flag0 for %d and is not an atomic multi-fragment output transaction.
+The linked map, packer, compiler, kernel and runtime check these
 bounds. ABI3 entry must be in generated code, not inside runtime or strings.
 The kernel validates before any shared app copy or child publication. Runtime
 validates at entry and helper dispatch. Existing files are never healed/reseeded.

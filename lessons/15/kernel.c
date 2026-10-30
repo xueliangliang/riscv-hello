@@ -10,6 +10,10 @@ __attribute__((noinline)) void application_admission_begin(void)
 {
     __asm__ volatile("" ::: "memory");
 }
+__attribute__((noinline)) void application_write(unsigned long pointer, unsigned long length)
+{
+    __asm__ volatile("" : : "r"(pointer), "r"(length) : "memory");
+}
 __attribute__((noinline)) void application_rejected(void)
 {
     __asm__ volatile("" ::: "memory");
@@ -581,6 +585,9 @@ static long syscall(struct Process *process, int *reschedule)
     case SYS_WRITE:
         if (second > 256 || !readable((unsigned long)first, second)) {
             return E_ARG;
+        }
+        if (current == file_slot) {
+            application_write(first, second);
         }
         for (unsigned long i = 0; i < second; i++) {
             uart_putc(((const char *)first)[i]);

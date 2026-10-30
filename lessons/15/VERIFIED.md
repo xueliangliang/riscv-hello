@@ -18,3 +18,13 @@ preprocessor directive) was isolated with the identical `frontend-test.py
 BEFORE directive recognition; all46 class-specific negative compiles and three
 valid recoveries pass after the change. Scratch logs preserve the actual old
 failure and new result; no older published lesson was edited.
+
+A second actual regression was observed when digit-by-digit integer output
+interleaved with the other hart's shell admission/prompt. The GDB test now
+requires a single exact `33333+LF` WRITE, and was run fail-first on the old
+byte-write runtime (length1, byte `3`) before the buffer-write fix. Exact-bit
+observation lines are likewise one WRITE. printf fragments are explicitly not
+a console transaction. Runtime-address breakpoints are scoped to the actual
+native image lifetime so overlaid cc code cannot satisfy or spuriously trip a
+runtime checkpoint; generated argc/argv checks now launch explicit copied args
+rather than incorrectly expecting argv from the documented zero/zero call.

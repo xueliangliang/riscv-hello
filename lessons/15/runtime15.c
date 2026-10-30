@@ -46,15 +46,33 @@ static void unsigned_decimal(unsigned long value)
         character(buffer[--count]);
     }
 }
-long rt_integer(long value)
+long rt_integer(long value, unsigned long newline)
 {
     rt_guard();
+    if (newline > 1) {
+        failure("integer output flag");
+    }
+    char buffer[24];
+    unsigned used = sizeof(buffer);
+    if (newline) {
+        buffer[--used] = '\n';
+    }
     unsigned long magnitude = (unsigned long)value;
     if (value < 0) {
-        character('-');
         magnitude = 0UL - magnitude;
     }
-    unsigned_decimal(magnitude);
+    do {
+        buffer[--used] = '0' + magnitude % 10;
+        magnitude /= 10;
+    } while (magnitude);
+    if (value < 0) {
+        buffer[--used] = '-';
+    }
+    /* One checked write keeps a complete print_int line from interleaving
+     * digit-by-digit with the independently running shell/other hart. */
+    if (syscall2(SYS_WRITE, (unsigned long)(buffer + used), sizeof(buffer) - used) != (long)(sizeof(buffer) - used)) {
+        failure("integer console write");
+    }
     return 0;
 }
 long rt_text(const char *text, unsigned long length)
@@ -78,11 +96,17 @@ long rt_bits(double value)
 {
     rt_guard();
     unsigned long raw = bits(value);
-    say("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        character("0123456789abcdef"[(raw >> shift) & 15]);
+    char buffer[19];
+    buffer[0] = '0';
+    buffer[1] = 'x';
+    for (unsigned index = 0; index < 16; index++) {
+        unsigned shift = 60 - index * 4;
+        buffer[index + 2] = "0123456789abcdef"[(raw >> shift) & 15];
     }
-    character('\n');
+    buffer[18] = '\n';
+    if (syscall2(SYS_WRITE, (unsigned long)buffer, sizeof(buffer)) != sizeof(buffer)) {
+        failure("bits console write");
+    }
     return 0;
 }
 long rt_floating(double value)

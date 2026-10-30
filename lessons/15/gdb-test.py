@@ -19,6 +19,7 @@ def check_gdb_output(output):
     assert all(int(size)==compiler_size for name,hart,pc,size in entries if name==b'cc')
     assert all(pc==b'0x80500000' for name,hart,pc,size in entries if name==b'cc')
     assert all(int(size)>=32768 and pc==b'0x80505000' for name,hart,pc,size in entries if name==b'native')
+    assert re.findall(rb'ATOMIC INTEGER LINE hart=([01]) exact_write=33333\+LF',output)==[b'1',b'0']
     assert output.count(b'ADMISSION REJECT entire_1MiB_unchanged states_unchanged') == 6
     assert re.findall(rb'ACTUAL DLL EXPORT hart=([01]) argument=0x400a000000000000', output) == [b'1', b'0']
     assert re.findall(rb'RUNTIME MODULE FENCE hart=([01])', output) == [b'1', b'0']
@@ -67,6 +68,7 @@ entries=[]
 exports=[]
 module_fences=[]
 rejections=[]
+integer_writes=[]
 admission_bytes=None
 admission_states=None
 installed=set()
@@ -112,11 +114,12 @@ class NativeEntry(gdb.Breakpoint):
                 assert memory(pointers[1],6)==b'gdb.c\\0'
                 assert memory(pointers[2],7)==b'native\\0'
             else:
-                assert integer('$a0')==1
+                assert integer('$a0')==2
                 argv=integer('$a1')
                 assert 0x80407000 <= argv < 0x80407800
-                pointers=struct.unpack('<2Q',memory(argv,16))
-                assert pointers[1]==0 and memory(pointers[0],7)==b'native\\0'
+                pointers=struct.unpack('<3Q',memory(argv,24))
+                assert pointers[2]==0 and memory(pointers[0],7)==b'native\\0'
+                assert memory(pointers[1],7)==b'copied\\0'
                 memory_size=int.from_bytes(image[28:32],'little')
                 payload_size=len(image)-48
                 assert memory(0x80500000+payload_size,memory_size-payload_size)==bytes(memory_size-payload_size)
@@ -149,6 +152,25 @@ class Received(gdb.Breakpoint):
         except Exception as error:
             failure=error
             return True
+class ProgramWrite(gdb.Breakpoint):
+    def stop(self):
+        global failure
+        try:
+            if not entries or entries[-1][0]!='native':
+                return False
+            hart=entries[-1][1]
+            if hart in integer_writes:
+                return False
+            pointer=integer('$a0')
+            length=integer('$a1')
+            assert length==6 and memory(pointer,length)==b'33333\\n', ('non-atomic integer line',length,memory(pointer,length))
+            integer_writes.append(hart)
+            print('ATOMIC INTEGER LINE hart=%d exact_write=33333+LF'%hart)
+            return False
+        except Exception as error:
+            failure=error
+            return True
+ProgramWrite('application_write',internal=True)
 class Admission(gdb.Breakpoint):
     def stop(self):
         global admission_bytes,admission_states,failure
@@ -178,6 +200,8 @@ class ModuleFence(gdb.Breakpoint):
     def stop(self):
         global failure
         try:
+            if not entries or entries[-1][0]!='native':
+                return False
             hart=entries[-1][1]
             assert 'fence.i' in gdb.execute('x/5i $pc',to_string=True)
             module_fences.append(hart)
@@ -204,6 +228,8 @@ class Dispatch(gdb.Breakpoint):
     def stop(self):
         global failure
         try:
+            if not entries or entries[-1][0]!='native':
+                return False
             target=integer('$a0')
             assert integer('$a1')==1
             banks={runtime_symbols['banks']}
@@ -232,6 +258,7 @@ assert receivers==entries
 assert fences==[1,1,0,0]
 assert exports==[1,0] and module_fences==[1,0]
 assert len(rejections)==6
+assert integer_writes==[1,0]
 print('PASS GDB: actual compiler and emitted program U entries, exact persisted payload, argv and both receiving-hart fences')
 end
 detach
@@ -252,7 +279,7 @@ quit
                     assert match,result
                     pid=int(match[1])
                     guest.cmd(f'wait {pid}',f'wait target={pid} result=0')
-                    result=guest.cmd('./native')
+                    result=guest.cmd('./native copied')
                     match=re.search(r'exec target=0 result=(\d+)',result)
                     assert match,result
                     pid=int(match[1])

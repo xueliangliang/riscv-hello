@@ -23,6 +23,8 @@ printf requires a literal format, at most8 typed arguments, exact format count,
 %f prints six decimal places, rounds ties away in magnitude within |x|<1e9;
 larger finite magnitudes print <range>. nan/inf/-inf/-0.000000 are explicit.
 print_bits prints all16 hex digits and newline; print_int retains newline.
+Each complete print_int/print_bits line is one bounded WRITE. printf returns0
+and its multiple fragments are not an atomic console transaction.
 Only exact #include <stdio.h> and #include <math.h> at top-level are accepted
 as teaching declarations, not actual headers or a preprocessor. Unknown
 directives reject. No user functions/pointers/arrays/heap/full C.

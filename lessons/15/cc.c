@@ -878,6 +878,9 @@ static void generate_expression(int index)
             addi(11, 10, 0);
             addi(10, 5, 0);
         }
+        if (current_node->third == API_INTEGER) {
+            addi(11, 0, 0);
+        }
         runtime_call(current_node->third);
     } else if (kind == N_FORMAT) {
         for (int child = current_node->left; child; child = nodes[child].next) {
@@ -901,8 +904,8 @@ static void generate_expression(int index)
         }
     } else if (kind == N_PRINT) {
         generate_expression(current_node->left);
+        addi(11, 0, 1);
         runtime_call(API_INTEGER);
-        generate_text(0, 1);
     } else if (kind == N_PUTS) {
         generate_text(current_node->value, current_node->third);
     } else {
