@@ -189,6 +189,11 @@ long rt_ge(double left, double right)
     rt_guard();
     return left >= right;
 }
+/* Stable debugger checkpoint immediately before a validated export call. */
+__attribute__((noinline)) void runtime_math_dispatch(unsigned long target, unsigned signature)
+{
+    __asm__ volatile("" : : "r"(target), "r"(signature) : "memory");
+}
 static void *resolve(unsigned index)
 {
     static const char *const names[] = {"ceil", "floor", "max", "min"};
@@ -209,6 +214,7 @@ static void *resolve(unsigned index)
             failure("math.dll export/signature mismatch");
         }
     }
+    runtime_math_dispatch((unsigned long)math_symbols[index], index < 2 ? DLL_UNARY : DLL_BINARY);
     return math_symbols[index];
 }
 double rt_ceil(double value)

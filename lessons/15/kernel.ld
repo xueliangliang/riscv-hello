@@ -52,7 +52,6 @@ SECTIONS
     /DISCARD/ :
     {
         *(.comment)
-        *(.riscv.attributes)
         *(.eh_frame*)
     }
 }

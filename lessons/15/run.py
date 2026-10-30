@@ -12,7 +12,7 @@ import tempfile
 
 def command(disk="state/lesson15/disk.img", readonly=False, device_extra="", drive_extra=""):
     return [os.environ.get("QEMU", "qemu-system-riscv64"),
-            "-machine", "virt", "-accel", "tcg,thread=multi", "-cpu", "rv64,sstc=true",
+            "-machine", "virt", "-accel", "tcg,thread=multi", "-cpu", "rv64,sstc=true,f=false,d=false,zfa=false",
             "-global", "virtio-mmio.force-legacy=false", "-smp", "2", "-m", "128M",
             "-display", "none", "-serial", "stdio", "-monitor", "none", "-bios", "none",
             "-kernel", "build/lesson15/bootloader.elf",

@@ -820,6 +820,9 @@ inspect-lesson14: resource-lesson14
 resource-lesson14: lesson14
 	$(PYTHON) lessons/14/resource-test.py
 
+SOFT_SOURCES := adddf3 subdf3 muldf3 divdf3 comparedf2 negdf2 fixdfdi fixunsdfdi floatdidf floatundidf floatsidf floatunsidf fixdfsi fixunsdfsi clzdi2 clzsi2 fp_mode
+SOFT_OBJECTS := $(addprefix build/lesson15/soft-,$(addsuffix .o,$(SOFT_SOURCES)))
+
 # Lesson15: bounded full-data redo journal over the B+ tree filesystem.
 SOFT_COMPILER_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/15 -Ibuild/lesson15
 SOFT_COMPILER_COMMON := build/lesson15/start.o build/lesson15/runtime.o build/lesson15/trap.o build/lesson15/fs.o build/lesson15/journal.o build/lesson02/uart.o
@@ -913,7 +916,7 @@ build/lesson15/integer-runtime.h: build/lesson15/integer-runtime.elf lessons/15/
 	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/runtime-pack.py $< build/lesson15/integer-runtime.raw $@
 build/lesson15/cc.o: build/lesson15/integer-runtime.h
 build/lesson15/cc.o: SOFT_COMPILER_FLAGS += -fstack-usage
-build/lesson15/cc.elf: build/lesson15/cc-start.o build/lesson15/cc.o build/lesson15/formats.o build/lesson15/syscall.o lessons/15/cc.ld
+build/lesson15/cc.elf: build/lesson15/cc-start.o build/lesson15/cc.o build/lesson15/formats.o build/lesson15/syscall.o lessons/15/cc.ld $(SOFT_OBJECTS)
 	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none,-Map,build/lesson15/cc.map -T lessons/15/cc.ld -o $@ $(filter %.o,$^)
 build/lesson15/cc.exec: build/lesson15/cc.elf lessons/15/pack.py
 	$(OBJCOPY) -O binary $< build/lesson15/cc.raw
@@ -925,8 +928,7 @@ resource-lesson15: lesson15
 	$(PYTHON) lessons/15/resource-test.py
 
 # Explicit upstream builtin closure: no system libc or LP64D libgcc.
-SOFT_SOURCES := adddf3 subdf3 muldf3 divdf3 comparedf2 negdf2 fixdfdi fixunsdfdi floatdidf floatundidf floatsidf floatunsidf fixdfsi fixunsdfsi clzdi2 clzsi2 fp_mode
-SOFT_OBJECTS := $(addprefix build/lesson15/soft-,$(addsuffix .o,$(SOFT_SOURCES)))
+
 SOFT_HEADERS := $(wildcard lessons/15/softfloat/*.h lessons/15/softfloat/*.inc)
 build/lesson15/soft-%.o: lessons/15/softfloat/%.c $(SOFT_HEADERS) | build/lesson15
 	$(CC) $(SOFT_COMPILER_FLAGS) -Os -nostdinc -isystem $(shell $(CC) -print-file-name=include) -D_LIBC_LIMITS_H_ -c -o $@ $<

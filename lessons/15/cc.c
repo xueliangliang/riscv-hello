@@ -1,6 +1,6 @@
 #include "syscall.h"
 #include "formats.h"
-#include "integer-runtime.h"
+#include "runtime-api.h"
 
 /* All capacities are static workspaces, not a heap. The guest loader clears
  * these bytes and checks the linker's memory bound before publishing READY. */
@@ -12,14 +12,16 @@
 #define DEPTH_LIMIT 64
 
 enum TokenKind {
-    T_END = 256, T_NAME, T_NUMBER, T_STRING, T_EQ, T_NE, T_LE, T_GE
+    T_END = 256, T_NAME, T_NUMBER, T_STRING, T_EQ, T_NE, T_LE, T_GE, T_DOUBLE
 };
 enum NodeKind {
     N_LITERAL = 300, N_LOCAL, N_STORE, N_POSITIVE, N_NEGATE, N_NOT,
-    N_BLOCK, N_IF, N_WHILE, N_RETURN, N_PUTS, N_PRINT, N_EMPTY
+    N_BLOCK, N_IF, N_WHILE, N_RETURN, N_PUTS, N_PRINT, N_EMPTY,
+    N_ITOD, N_DTOI, N_TRUTH, N_CALL, N_STRING, N_TEXT, N_FORMAT
 };
 struct Node {
     int kind;
+    unsigned type;
     int left;
     int right;
     int third;
@@ -32,6 +34,7 @@ struct Symbol {
     unsigned scope;
     unsigned slot;
     unsigned initializing;
+    unsigned type;
 };
 static char source[SOURCE_LIMIT + 1];
 static struct Node nodes[NODE_LIMIT];
@@ -49,6 +52,7 @@ static unsigned token_string_size;
 static unsigned node_count = 1;
 static unsigned symbol_count;
 static unsigned local_count;
+static unsigned local_types[256];
 static unsigned scope;
 static unsigned parse_depth;
 static unsigned statement_depth;
@@ -168,6 +172,28 @@ static void lex(void)
             position += 2;
             continue;
         }
+        if (position < source_size && source[position] == '#') {
+            unsigned start = position;
+            while (position < source_size && source[position] != '\n') {
+                position++;
+            }
+            const char *allowed[] = {"#include <stdio.h>", "#include <math.h>"};
+            int accepted = 0;
+            for (unsigned header = 0; header < 2; header++) {
+                unsigned used = 0;
+                while (allowed[header][used] && start + used < position &&
+                       source[start + used] == allowed[header][used]) {
+                    used++;
+                }
+                if (!allowed[header][used] && start + used == position) {
+                    accepted = 1;
+                }
+            }
+            if (!accepted || scope) {
+                error("unsupported preprocessor directive");
+            }
+            continue;
+        }
         break;
     }
     if (position == source_size) {
@@ -189,7 +215,7 @@ static void lex(void)
             position++;
         } while (1);
         token_name[used] = 0;
-        static const char *const unsupported[] = {"char", "short", "long", "unsigned", "signed", "double", "float",
+        static const char *const unsupported[] = {"char", "short", "long", "unsigned", "signed", "float",
             "struct", "union", "enum", "typedef", "const", "volatile", "static", "extern", "auto",
             "register", "goto", "for", "do", "switch", "case", "default", "break", "continue", "sizeof"};
         for (unsigned index = 0; index < sizeof(unsupported) / sizeof(unsupported[0]); index++) {
@@ -201,15 +227,84 @@ static void lex(void)
         return;
     }
     if (digit(byte)) {
-        token_value = byte - '0';
+        unsigned start = position - 1;
         while (position < source_size && digit(source[position])) {
-            unsigned next = source[position++] - '0';
-            if (token_value > (0x7fffffffffffffffUL - next) / 10) {
-                error("integer literal overflow");
+            position++;
+        }
+        unsigned integer_end = position;
+        int fractional = 0;
+        unsigned fraction_digits = 0;
+        if (position < source_size && source[position] == '.') {
+            fractional = 1;
+            position++;
+            unsigned fraction_start = position;
+            while (position < source_size && digit(source[position])) {
+                position++;
+                fraction_digits++;
+            }
+            if (position == fraction_start) {
+                error("floating fraction needs a digit");
+            }
+        }
+        unsigned significand_end = position;
+        int exponent = 0;
+        if (position < source_size && (source[position] == 'e' || source[position] == 'E')) {
+            fractional = 1;
+            position++;
+            int sign = 1;
+            if (source[position] == '+' || source[position] == '-') {
+                sign = source[position++] == '-' ? -1 : 1;
+            }
+            unsigned exponent_digits = 0;
+            while (position < source_size && digit(source[position])) {
+                exponent = exponent * 10 + source[position++] - '0';
+                if (++exponent_digits > 3 || exponent > 308) {
+                    error("floating exponent range exceeded");
+                }
+            }
+            if (!exponent_digits) {
+                error("floating exponent needs a digit");
+            }
+            exponent *= sign;
+        }
+        if (position < source_size && (letter(source[position]) || source[position] == '.')) {
+            error("invalid numeric suffix");
+        }
+        token_value = 0;
+        unsigned digits = 0;
+        for (unsigned cursor = start; cursor < significand_end; cursor++) {
+            if (source[cursor] == '.') {
+                continue;
+            }
+            unsigned next = source[cursor] - '0';
+            if ((fractional && ++digits > 17) ||
+                token_value > (0x7fffffffffffffffUL - next) / 10) {
+                error(fractional ? "floating significand exceeds17 digits" : "integer literal overflow");
             }
             token_value = token_value * 10 + next;
         }
-        token = T_NUMBER;
+        (void)integer_end;
+        if (fractional) {
+            union { double value; unsigned long bits; } number;
+            number.value = (double)(long)token_value;
+            int scale = exponent - (int)fraction_digits;
+            while (scale > 0) {
+                number.value *= 10.0;
+                scale--;
+            }
+            while (scale < 0) {
+                number.value /= 10.0;
+                scale++;
+            }
+            if ((number.bits & 0x7ff0000000000000UL) == 0x7ff0000000000000UL) {
+                error("floating literal overflow");
+            }
+            if (token_value && !(number.bits & 0x7fffffffffffffffUL)) {
+                error("floating literal underflow to zero");
+            }
+            token_value = number.bits;
+        }
+        token = fractional ? T_DOUBLE : T_NUMBER;
         return;
     }
     if (byte == '"') {
@@ -304,14 +399,110 @@ static unsigned find_local(const char *name)
     error("unknown local or unsupported function/type");
 }
 static int expression(unsigned minimum);
+static int convert(int index, unsigned type)
+{
+    if (nodes[index].type == 2 || type > 1) {
+        error("numeric expression required");
+    }
+    if (nodes[index].type == type) {
+        return index;
+    }
+    int result = node(type ? N_ITOD : N_DTOI, index, 0, 0, 0);
+    nodes[result].type = type;
+    return result;
+}
+static int truth(int index)
+{
+    if (nodes[index].type == 2) {
+        error("string cannot be a condition");
+    }
+    return nodes[index].type ? node(N_TRUTH, index, 0, 0, 0) : index;
+}
+static int text_node(unsigned offset, unsigned size)
+{
+    return node(N_TEXT, 0, 0, size, offset);
+}
+static int format_call(void)
+{
+    lex();
+    expect('(');
+    if (token != T_STRING) {
+        error("printf requires a literal format");
+    }
+    unsigned start = token_value;
+    unsigned length = token_string_size;
+    lex();
+    int arguments[8];
+    unsigned count = 0;
+    while (token == ',') {
+        lex();
+        if (count == 8) {
+            error("printf argument capacity exceeded");
+        }
+        arguments[count++] = expression(1);
+    }
+    expect(')');
+    unsigned used = 0;
+    int first = 0;
+    int last = 0;
+    unsigned cursor = 0;
+    while (cursor < length) {
+        unsigned begin = cursor;
+        while (cursor < length && strings[start + cursor] != '%') {
+            cursor++;
+        }
+        int part;
+        if (cursor > begin) {
+            part = text_node(start + begin, cursor - begin);
+        } else {
+            if (++cursor == length) {
+                error("unterminated printf conversion");
+            }
+            unsigned specifier = strings[start + cursor++];
+            if (specifier == '%') {
+                part = text_node(start + cursor - 1, 1);
+            } else {
+                if (used == count) {
+                    error("printf missing argument");
+                }
+                int argument = arguments[used++];
+                unsigned required = specifier == 'd' ? 0 : specifier == 'f' ? 1 : 2;
+                if ((specifier != 'd' && specifier != 'f' && specifier != 's') ||
+                    nodes[argument].type != required) {
+                    error("printf conversion/type mismatch");
+                }
+                if (specifier == 's') {
+                    part = text_node(nodes[argument].value, nodes[argument].third);
+                } else {
+                    part = node(N_CALL, argument, 0, specifier == 'd' ? API_INTEGER : API_FLOATING, 0);
+                }
+            }
+        }
+        if (last) {
+            nodes[last].next = part;
+        } else {
+            first = part;
+        }
+        last = part;
+    }
+    if (used != count) {
+        error("printf extra argument");
+    }
+    return node(N_FORMAT, first, 0, 0, 0);
+}
 static int primary(void)
 {
     int result;
     if (++parse_depth > DEPTH_LIMIT) {
         error("expression nesting exceeded");
     }
-    if (token == T_NUMBER) {
+    if (token == T_NUMBER || token == T_DOUBLE) {
         result = node(N_LITERAL, 0, 0, 0, token_value);
+        nodes[result].type = token == T_DOUBLE;
+        lex();
+    } else if (token == T_STRING) {
+        result = node(N_STRING, 0, 0, token_string_size, token_value);
+        nodes[result].type = 2;
         lex();
     } else if (token == '+' || token == '-' || token == '!') {
         int operation = token;
@@ -320,7 +511,15 @@ static int primary(void)
         /* Unary + preserves the value, not the operand's lvalue category.
          * Parentheses alone deliberately retain the underlying N_LOCAL. */
         int kind = operation == '+' ? N_POSITIVE : operation == '-' ? N_NEGATE : N_NOT;
+        if (nodes[result].type == 2) {
+            error("numeric unary operand required");
+        }
+        unsigned type = operation == '!' ? 0 : nodes[result].type;
+        if (operation == '!') {
+            result = truth(result);
+        }
         result = node(kind, result, 0, 0, 0);
+        nodes[result].type = type;
     } else if (token == '(') {
         lex();
         result = expression(1);
@@ -338,14 +537,36 @@ static int primary(void)
         result = node(N_PUTS, 0, 0, token_string_size + 1, token_value);
         lex();
         expect(')');
-    } else if (keyword("print_int")) {
+    } else if (keyword("printf")) {
+        result = format_call();
+    } else if (keyword("print_int") || keyword("print_bits")) {
+        int exact_bits = keyword("print_bits");
         lex();
         expect('(');
-        result = node(N_PRINT, expression(1), 0, 0, 0);
+        int argument = expression(1);
+        if (nodes[argument].type != (unsigned)exact_bits) {
+            error("print argument type mismatch");
+        }
+        result = node(exact_bits ? N_CALL : N_PRINT, argument, 0, API_BITS, 0);
         expect(')');
+    } else if (keyword("ceil") || keyword("floor") || keyword("max") || keyword("min")) {
+        unsigned api = keyword("ceil") ? API_CEIL : keyword("floor") ? API_FLOOR :
+                       keyword("max") ? API_MAX : API_MIN;
+        lex();
+        expect('(');
+        int left = convert(expression(1), 1);
+        int right = 0;
+        if (api == API_MAX || api == API_MIN) {
+            expect(',');
+            right = convert(expression(1), 1);
+        }
+        expect(')');
+        result = node(N_CALL, left, right, api, 0);
+        nodes[result].type = 1;
     } else if (token == T_NAME) {
         unsigned slot = find_local(token_name);
         result = node(N_LOCAL, 0, 0, 0, slot);
+        nodes[result].type = local_types[slot];
         lex();
     } else {
         error("expected integer expression");
@@ -387,9 +608,22 @@ static int expression(unsigned minimum)
             if (nodes[left].kind != N_LOCAL) {
                 error("assignment requires a local lvalue");
             }
-            left = node(N_STORE, right, 0, 0, nodes[left].value);
+            unsigned slot = nodes[left].value;
+            right = convert(right, local_types[slot]);
+            left = node(N_STORE, right, 0, 0, slot);
+            nodes[left].type = local_types[slot];
         } else {
+            if (nodes[left].type == 2 || nodes[right].type == 2) {
+                error("numeric binary operands required");
+            }
+            unsigned promoted = nodes[left].type || nodes[right].type;
+            if (operation == '%' && promoted) {
+                error("floating remainder unsupported");
+            }
+            left = convert(left, promoted);
+            right = convert(right, promoted);
             left = node(operation, left, right, 0, 0);
+            nodes[left].type = level >= 4 ? promoted : 0;
         }
     }
     parse_depth--;
@@ -425,10 +659,13 @@ static int statement(void)
         symbol_count = saved_symbols;
         scope--;
         result = node(N_BLOCK, first, 0, 0, 0);
-    } else if (keyword("int")) {
+    } else if (keyword("int") || keyword("double")) {
+        unsigned declared_type = keyword("double");
         lex();
         if (token != T_NAME || keyword("int") || keyword("return") || keyword("while") ||
-            keyword("if") || keyword("else") || keyword("void") || keyword("puts") || keyword("print_int")) {
+            keyword("if") || keyword("else") || keyword("void") || keyword("puts") || keyword("print_int") ||
+            keyword("double") || keyword("printf") || keyword("print_bits") || keyword("ceil") ||
+            keyword("floor") || keyword("max") || keyword("min")) {
             error("expected local identifier");
         }
         if (symbol_count == SYMBOL_LIMIT || local_count == 256) {
@@ -445,6 +682,8 @@ static int statement(void)
         }
         symbol->scope = scope;
         symbol->slot = local_count++;
+        symbol->type = declared_type;
+        local_types[symbol->slot] = declared_type;
         symbol->initializing = 1;
         unsigned slot = symbol->slot;
         lex();
@@ -455,21 +694,22 @@ static int statement(void)
         }
         symbol->initializing = 0;
         expect(';');
-        result = node(N_STORE, initializer, 0, 0, slot);
+        result = node(N_STORE, convert(initializer, declared_type), 0, 0, slot);
+        nodes[result].type = declared_type;
     } else if (keyword("if") || keyword("while")) {
         int loop = keyword("while");
         lex();
         expect('(');
-        int condition = expression(1);
+        int condition = truth(expression(1));
         expect(')');
-        if (keyword("int")) {
+        if (keyword("int") || keyword("double")) {
             error("declaration requires a block");
         }
         int body = statement();
         int alternative = 0;
         if (!loop && keyword("else")) {
             lex();
-            if (keyword("int")) {
+            if (keyword("int") || keyword("double")) {
                 error("declaration requires a block");
             }
             alternative = statement();
@@ -477,7 +717,7 @@ static int statement(void)
         result = node(loop ? N_WHILE : N_IF, condition, body, alternative, 0);
     } else if (keyword("return")) {
         lex();
-        result = node(N_RETURN, expression(1), 0, 0, 0);
+        result = node(N_RETURN, convert(expression(1), 0), 0, 0, 0);
         expect(';');
     } else if (token == ';') {
         lex();
@@ -500,7 +740,7 @@ static void put32(unsigned offset, unsigned value)
 }
 static void emit(unsigned instruction)
 {
-    if (code_size + 4 > CODE_LIMIT) {
+    if (code_size + 4 > RT_STRINGS) {
         error("native code capacity exceeded");
     }
     put32(EXEC_HEADER + code_size, instruction);
@@ -586,6 +826,21 @@ static void exit_code(void)
     emit(0x73);
     emit(0x0000006f);
 }
+static void runtime_call(unsigned api)
+{
+    if (api >= RT_COUNT || load32(image + EXEC_HEADER + RT_TABLE + api * 8 + 4) != runtime_signature(api)) {
+        error("runtime API signature mismatch");
+    }
+    unsigned target = load32(image + EXEC_HEADER + RT_TABLE + api * 8);
+    literal(6, APP_BASE + target);
+    emit(immediate(0, 6, 0, 1, 0x67));
+}
+static void generate_text(unsigned offset, unsigned size)
+{
+    literal(10, APP_BASE + RT_STRINGS + offset);
+    literal(11, size);
+    runtime_call(API_TEXT);
+}
 static void generate_expression(int index);
 static void generate_statement(int index);
 static void generate_expression(int index)
@@ -603,35 +858,91 @@ static void generate_expression(int index)
     } else if (kind == N_STORE) {
         generate_expression(current_node->left);
         store(10, 8, current_node->value * 8);
+    } else if (kind == N_ITOD || kind == N_DTOI || kind == N_TRUTH) {
+        generate_expression(current_node->left);
+        runtime_call(kind == N_ITOD ? API_ITOD : kind == N_DTOI ? API_DTOI : API_TRUTH);
+    } else if (kind == N_CALL) {
+        generate_expression(current_node->left);
+        if (current_node->right) {
+            push();
+            generate_expression(current_node->right);
+            pop();
+            addi(11, 10, 0);
+            addi(10, 5, 0);
+        }
+        runtime_call(current_node->third);
+    } else if (kind == N_FORMAT) {
+        for (int child = current_node->left; child; child = nodes[child].next) {
+            generate_expression(child);
+        }
+        addi(10, 0, 0);
+    } else if (kind == N_TEXT) {
+        generate_text(current_node->value, current_node->third);
+    } else if (kind == N_STRING) {
+        error("string literal only valid in printf or puts");
     } else if (kind == N_POSITIVE || kind == N_NEGATE || kind == N_NOT) {
         generate_expression(current_node->left);
         if (kind == N_NEGATE) {
-            emit(0x40a00533);
+            if (current_node->type) {
+                runtime_call(API_NEG);
+            } else {
+                emit(0x40a00533);
+            }
         } else if (kind == N_NOT) {
             emit(immediate(1, 10, 3, 10, 0x13));
         }
     } else if (kind == N_PRINT) {
         generate_expression(current_node->left);
-        unsigned location = jump();
-        jump_patch(location, INTEGER_PRINT_OFFSET, 1);
+        runtime_call(API_INTEGER);
+        generate_text(0, 1);
     } else if (kind == N_PUTS) {
-        unsigned remaining = current_node->third;
-        unsigned offset = current_node->value;
-        while (remaining) {
-            unsigned count = remaining > 256 ? 256 : remaining;
-            literal(10, APP_BASE + CODE_LIMIT + offset);
-            addi(11, 0, count);
-            addi(17, 0, SYS_WRITE);
-            emit(0x73);
-            remaining -= count;
-            offset += count;
-        }
-        addi(10, 0, 0);
+        generate_text(current_node->value, current_node->third);
     } else {
         generate_expression(current_node->left);
         push();
         generate_expression(current_node->right);
         pop();
+        if (nodes[current_node->left].type == 1) {
+            unsigned api;
+            switch (kind) {
+            case '+':
+                api = API_ADD;
+                break;
+            case '-':
+                api = API_SUB;
+                break;
+            case '*':
+                api = API_MUL;
+                break;
+            case '/':
+                api = API_DIV;
+                break;
+            case T_EQ:
+                api = API_EQ;
+                break;
+            case T_NE:
+                api = API_NE;
+                break;
+            case '<':
+                api = API_LT;
+                break;
+            case T_LE:
+                api = API_LE;
+                break;
+            case '>':
+                api = API_GT;
+                break;
+            case T_GE:
+                api = API_GE;
+                break;
+            default: error("internal floating operator");
+            }
+            addi(11, 10, 0);
+            addi(10, 5, 0);
+            runtime_call(api);
+            generation_depth--;
+            return;
+        }
         switch (kind) {
         case '+':
             binary(0, 0);
@@ -745,24 +1056,9 @@ static unsigned compile(void)
     if (token != T_END) {
         error("unexpected input after main");
     }
-    if (INTEGER_RUNTIME_VERSION != 1 || INTEGER_RUNTIME_SIZE != sizeof(integer_runtime) ||
-        INTEGER_PRINT_OFFSET < 32 || INTEGER_PRINT_OFFSET >= INTEGER_RUNTIME_SIZE ||
-        load32(integer_runtime + 8) != 1 || load32(integer_runtime + 12) != INTEGER_RUNTIME_SIZE ||
-        load32(integer_runtime + 16) != INTEGER_PRINT_OFFSET || load32(integer_runtime + 20) ||
-        load32(integer_runtime + 24) || load32(integer_runtime + 28)) {
-        error("integer runtime prefix mismatch");
-    }
-    const char *magic = "RVINT14";
-    for (unsigned byte = 0; byte < 8; byte++) {
-        if (integer_runtime[byte] != (unsigned char)magic[byte]) {
-            error("integer runtime prefix magic");
-        }
-    }
-    for (unsigned byte = 0; byte < INTEGER_RUNTIME_SIZE; byte++) {
-        image[EXEC_HEADER + byte] = integer_runtime[byte];
-    }
-    code_size = INTEGER_RUNTIME_SIZE;
+    code_size = RT_PREFIX;
     unsigned entry = code_size;
+    runtime_call(API_GUARD);
     addi(2, 2, -2048);
     addi(8, 2, 0);
     generate_statement(root);
@@ -772,9 +1068,9 @@ static unsigned compile(void)
     /* A fixed data base simplifies literal addresses; padding is file data,
      * not interpreter state. The generated executable contains no source. */
     for (unsigned byte = 0; byte < string_size; byte++) {
-        image[EXEC_HEADER + CODE_LIMIT + byte] = strings[byte];
+        image[EXEC_HEADER + RT_STRINGS + byte] = strings[byte];
     }
-    unsigned payload = (CODE_LIMIT + string_size + 15) & ~15U;
+    unsigned payload = (RT_STRINGS + string_size + 15) & ~15U;
     for (unsigned byte = 0; byte < 8; byte++) {
         image[byte] = (unsigned char)"RVEXEC1"[byte];
     }
@@ -783,8 +1079,8 @@ static unsigned compile(void)
     put32(16, payload);
     put32(20, entry);
     put32(24, APP_BASE);
-    put32(28, payload);
-    put32(32, 2);
+    put32(28, load32(image + EXEC_HEADER + 36));
+    put32(32, 3);
     put32(36, code_end);
     put32(40, 0);
     put32(44, 0);
@@ -828,6 +1124,17 @@ void cc_main(unsigned long argc, char **argv)
     }
     source_size = count;
     source[source_size] = 0;
+    long runtime_size = syscall3(SYS_READFILE, (unsigned long)"c_runtime",
+                                 (unsigned long)(image + EXEC_HEADER), RT_PREFIX);
+    if (runtime_size < 0) {
+        say("cc: runtime template read failed\n");
+        user_exit(3);
+    }
+    if (!runtime_valid(image + EXEC_HEADER, runtime_size)) {
+        error("runtime template contract mismatch");
+    }
+    strings[0] = '\n';
+    string_size = 1;
     unsigned size = compile();
     long published = syscall3(SYS_STORE, (unsigned long)argv[2], (unsigned long)image, size);
     if (published != size) {

@@ -17,6 +17,10 @@ assert spec and spec.loader
 oracle=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(oracle)
 BUILD=Path('build/lesson15')
+float_spec=importlib.util.spec_from_file_location('float_oracle','lessons/15/float-test.py')
+assert float_spec and float_spec.loader
+float_oracle=importlib.util.module_from_spec(float_spec)
+float_spec.loader.exec_module(float_oracle)
 
 def rejects(function,*arguments):
     try:
@@ -30,7 +34,10 @@ with tempfile.TemporaryDirectory(prefix='lesson15-mutants-',dir=os.environ.get('
     original=Path('lessons/15/cc.c').read_text()
     changes=[('subtract','binary(0, 32);','binary(0, 0);'),
              ('branch','emit(0x00051463);','emit(0x00050463);'),
-             ('store','store(10, 8, current_node->value * 8);','store(10, 8, current_node->value * 8 + 8);')]
+             ('store','store(10, 8, current_node->value * 8);','store(10, 8, current_node->value * 8 + 8);'),
+             ('float-emitter','api = API_SUB;','api = API_ADD;'),
+             ('convert','kind == N_ITOD ? API_ITOD :','kind == N_ITOD ? API_NEG :'),
+             ('dispatch','runtime_call(current_node->third);','runtime_call(current_node->third == API_CEIL ? API_FLOOR : current_node->third);')]
     cc=os.environ.get('CC','riscv64-linux-gnu-gcc')
     flags=['-march=rv64imac_zicsr_zifencei','-mabi=lp64','-mcmodel=medany','-g','-O1','-ffreestanding','-fno-builtin','-fno-pic','-fno-stack-protector','-msmall-data-limit=0','-fno-unwind-tables','-fno-asynchronous-unwind-tables','-Ilessons/15','-Ibuild/lesson15']
     records=[]
@@ -43,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='lesson15-mutants-',dir=os.environ.get('
         raw=directory/(name+'.raw')
         executable=directory/(name+'.exec')
         subprocess.run([cc,*flags,'-c',str(source),'-o',str(object_file)],check=True)
-        subprocess.run([cc,*flags,'-nostdlib','-static','-Wl,--build-id=none','-T','lessons/15/cc.ld',str(object_file),'build/lesson15/cc-start.o','build/lesson15/formats.o','build/lesson15/syscall.o','-o',str(elf)],check=True)
+        subprocess.run([cc,*flags,'-nostdlib','-static','-Wl,--build-id=none','-T','lessons/15/cc.ld',str(object_file),'build/lesson15/cc-start.o','build/lesson15/formats.o','build/lesson15/syscall.o',*[str(BUILD/('soft-'+entry['name'][:-2]+'.o')) for entry in json.loads(Path('lessons/15/softfloat/UPSTREAM.json').read_text())['files'] if entry['name'].endswith('.c')],'-o',str(elf)],check=True)
         subprocess.run([os.environ.get('OBJCOPY','riscv64-linux-gnu-objcopy'),'-O','binary',str(elf),str(raw)],check=True)
         subprocess.run(['python3','lessons/15/pack.py','compiler',str(elf),str(raw),str(executable)],check=True)
         disk=directory/(name+'.img')
@@ -55,17 +62,39 @@ with tempfile.TemporaryDirectory(prefix='lesson15-mutants-',dir=os.environ.get('
         guest=Guest('mutant-'+name+'.log',str(disk))
         try:
             guest.until('15> ')
-            body=b'int main(){int x=40; int y=7; if(x>y) print_int(x-y); else print_int(123); return 0;}\n'
+            body=b'int main(){int x=40; int y=7; if(x>y) print_int(x-y); else print_int(123); print_bits(7.25-2.5); print_bits(9007199254740993+0.0); print_bits(ceil(3.25)); return 0;}\n'
             oracle.paste(guest,'mutant.c',body)
             oracle.run(guest,'./cc mutant.c native',0)
             record,transcript=oracle.run(guest,'./native',0)
-            rejects(oracle.check_execution,transcript,record['pid'],0,['33'])
+            def full_result():
+                oracle.check_execution(transcript,record['pid'],0,['33'])
+                float_oracle.check_bits(transcript,[4.75,float(9007199254740993),4.0])
+            rejects(full_result)
             assert b'cc: published native' in guest.all
             assert b'FAIL:' not in guest.all
             guest.shutdown()
             records.append(name)
         finally:
             guest.close()
+    # Mutate the actual runtime API table (valid structure, wrong semantics).
+    disk=directory/'runtime-api.img'
+    shutil.copyfile(BUILD/'disk.img',disk)
+    fs=Native(disk)
+    runtime=bytearray((BUILD/'c_runtime').read_bytes())
+    runtime[64+19*8:68+19*8]=runtime[64+20*8:68+20*8]
+    fs.put('c_runtime',bytes(runtime))
+    fs.save(disk)
+    guest=Guest('mutant-runtime-api.log',str(disk))
+    try:
+        guest.until('15> ')
+        oracle.paste(guest,'api.c','int main(){print_bits(ceil(3.25));return 0;}\n')
+        oracle.run(guest,'./cc api.c api',0)
+        _,transcript=oracle.run(guest,'./api',0)
+        rejects(float_oracle.check_bits,transcript,[4.0])
+        guest.shutdown()
+    finally:
+        guest.close()
+    records.append('runtime-api-table')
     # Captured genuine evidence: change one invariant at a time.
     results=json.loads((BUILD/'runtime-results.json').read_text())
     whole=(BUILD/'compiler-uart.log').read_bytes()
@@ -80,7 +109,7 @@ with tempfile.TemporaryDirectory(prefix='lesson15-mutants-',dir=os.environ.get('
     files=decode(BUILD/'compiler-verified.img')
     original_output=files['loop']['content']
     oracle.native_header(original_output)
-    for offset in (8,24,32,48+int.from_bytes(original_output[20:24],'little')):
+    for offset in (8,24,32,48+68,48+int.from_bytes(original_output[20:24],'little')):
         mutant=bytearray(original_output)
         mutant[offset]^=1
         rejects(oracle.native_header,bytes(mutant))

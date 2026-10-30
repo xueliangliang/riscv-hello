@@ -53,21 +53,29 @@ def main():
     cc=os.environ.get('CC','riscv64-linux-gnu-gcc')
     commands=[('gate-build',['make','--no-print-directory','-B','lesson15', f'CC={cc}']),
               ('gate-resources',[sys.executable,'lessons/15/resource-test.py']),
+              ('gate-helpers',[sys.executable,'lessons/15/helper-test.py']),
+              ('gate-legacy-ABI2',[sys.executable,'lessons/15/legacy-test.py']),
               ('gate-formats',[sys.executable,'lessons/15/vectors.py']),
               ('gate-legacy-module',[sys.executable,'lessons/15/loader-test.py']),
               ('gate-storage',[sys.executable,'lessons/15/store-test.py']),
               ('gate-runtime',[sys.executable,'lessons/15/compiler-test.py']),
+              ('gate-floats',[sys.executable,'lessons/15/float-test.py']),
+              ('gate-template',[sys.executable,'lessons/15/template-test.py']),
+              ('gate-module-negatives',[sys.executable,'lessons/15/module-negative-test.py']),
               ('gate-frontend',[sys.executable,'lessons/15/frontend-test.py']),
               ('gate-IO-U',[sys.executable,'lessons/15/compiler-io-test.py']),
+              ('gate-dll-IO',[sys.executable,'lessons/15/dll-io-test.py']),
               ('gate-raw-loss',[sys.executable,'lessons/15/raw-loss-test.py']),
               ('gate-mutants',[sys.executable,'lessons/15/mutant-test.py']),
               ('gate-launcher',[sys.executable,'lessons/15/launcher-test.py'])]
     stages=[stage(name,argv) for name,argv in commands]
     result=json.loads((BUILD/'runtime-results.json').read_text())
     assert result['status']=='PASS' and result['cold']['status']==23
+    floating=json.loads((BUILD/'float-results.json').read_text())
+    assert floating['status']=='PASS'
     frontend=json.loads((BUILD/'frontend-all-results.json').read_text())
     assert frontend['status']=='PASS' and not frontend['errors']
-    (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result,'frontend':frontend},indent=2)+'\n')
+    (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result,'frontend':frontend,'floating':floating},indent=2)+'\n')
     print('PASS complete lesson15 gate: real guest compiler/native/cold closure, atomic storage, IO, raw loss, mutations and launcher')
 
 if __name__=='__main__':

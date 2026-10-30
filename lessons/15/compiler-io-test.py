@@ -12,8 +12,8 @@ from run import command
 
 with tempfile.TemporaryDirectory(prefix='lesson15-io-',dir=os.environ.get('TMPDIR')) as temporary:
     directory=Path(temporary)
-    for kind in (0,1,4):
-        disk=directory/f'disk{kind}.img'
+    for label,kind in (('source',0),('template',0),('write',1),('flush',4)):
+        disk=directory/f'disk-{label}.img'
         shutil.copyfile('build/lesson15/disk.img',disk)
         fs=Native(disk)
         source=b'int main() { print_int(123456); return 19; }\n'
@@ -21,8 +21,9 @@ with tempfile.TemporaryDirectory(prefix='lesson15-io-',dir=os.environ.get('TMPDI
         fs.put('saved',b'OLD\x00OUTPUT\xff')
         fs.save(disk)
         files=decode(disk)
-        sector=2048+(files['io.c']['head']-1)*8
-        config=directory/f'io{kind}.conf'
+        target = 'c_runtime' if label == 'template' else 'io.c'
+        sector=2048+(files[target]['head']-1)*8
+        config=directory/f'io-{label}.conf'
         if kind==0:
             inject=f'event = "read_aio"\nsector = "{sector}"\n'
         elif kind==1:
@@ -31,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='lesson15-io-',dir=os.environ.get('TMPDI
             inject='event = "flush_to_disk"\n'
         config.write_text('[set-state]\nevent = "write_aio"\nstate = "1"\nnew_state = "2"\n'
                           '[inject-error]\nstate = "2"\nerrno = "5"\nonce = "on"\n'+inject)
-        guest=Guest(f'io-compiler-{kind}.log',str(disk),True,
+        guest=Guest(f'io-compiler-{label}.log',str(disk),True,
                     options=command(f'blkdebug:{config}:{disk}',device_extra=',werror=report,rerror=report'))
         try:
             guest.until('15> ')
@@ -52,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='lesson15-io-',dir=os.environ.get('TMPDI
         assert after['saved']['content']==files['saved']['content']
         assert after['io.c']['content']==source
         # Recovery gets a NEW transport/FS instance; first reads precede writes.
-        guest=Guest(f'io-compiler-{kind}-recovery.log',str(disk))
+        guest=Guest(f'io-compiler-{label}-recovery.log',str(disk))
         try:
             guest.until('15> ')
             guest.cmd('cat io.c','print_int(123456)')

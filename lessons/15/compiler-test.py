@@ -38,11 +38,20 @@ def content(disk, name):
 def native_header(data):
     magic, version, size, payload, entry, base, memory, abi, code, a, b = struct.unpack_from('<8s10I', data)
     assert magic == b'RVEXEC1\0' and version == 1 and size == len(data)
-    assert payload == len(data)-48 and base == 0x80500000 and abi == 2
+    assert payload == len(data)-48 and base == 0x80500000 and abi == 3
     assert payload <= memory <= 1048576 and not payload % 16 and not memory % 16
-    assert 32 <= entry < code <= 32768 and not code % 4 and not (a or b)
-    assert struct.unpack_from('<I', data, 48+entry)[0] == 0x80010113, 'native stack prologue'
-    assert data[48:56] == b'RVINT14\0'
+    assert 20480 <= entry < code <= 53248 and not code % 4 and not (a or b)
+    assert data[48:56] == b'RVRT15\0\0'
+    assert struct.unpack_from('<I', data, 56)[0] == 1
+    assert struct.unpack_from('<I', data, 60)[0] == 20480
+    assert struct.unpack_from('<I', data, 64)[0] == 23
+    signatures = [1,2,3,4,3,5,6,6,7,8,8,8,8,9,9,9,9,9,9,7,7,8,8]
+    begin, end = struct.unpack_from('<II', data, 48+24)
+    assert begin == 256 and begin < end <= 20480
+    for index, expected in enumerate(signatures):
+        target, signature = struct.unpack_from('<II', data, 48+64+index*8)
+        assert begin <= target < end and target % 2 == 0 and signature == expected
+    assert struct.unpack_from('<I', data, 48+entry)[0] == 0x00000313, 'native guard prologue' 
 
     return {'bytes': len(data), 'entry': entry, 'code': code,
             'sha256': hashlib.sha256(data).hexdigest()}
@@ -133,7 +142,7 @@ def main():
                 generated = content(disk,name)
                 header = native_header(generated)
                 if name == 'pages':
-                    assert header['code'] > 4096
+                    assert header['code'] - header['entry'] > 4096
                 execution, _ = run(guest, './'+name, status, expected)
                 records.append({'name':name,'compiler':compiler,'execution':execution,'header':header,'expected':expected})
                 expected_files[name+'.c'] = normalized
@@ -148,12 +157,12 @@ def main():
             guest.cmd(f'wait {worker_pid}', f'wait target={worker_pid} result=137')
             # Every deterministic frontend failure preserves FULL old output and absence.
             invalid = [
-                '', 'int main(){return ;}', 'int main(){double x;}',
+                '', 'int main(){return ;}', 'int main(){double x=1.0%2;}',
                 'int main(){print_int("x");}', 'int main(){puts(9);}',
                 'int main(){missing=3;}', 'int main(){int x; int x;}',
                 'int main(){ {int x=1;} return x;}', 'int main(){1=2;}',
                 'int main(){return 9223372036854775808;}', 'int main(){return 1&2;}',
-                'int main(){return 1.5;}', '#include <stdio.h>\nint main(){}',
+                'int main(){double x=1.0e;}', '#include <bad.h>\nint main(){}',
                 'int main(){puts("bad\\q");}', 'int main(){puts("bad);}',
                 'int main(){/* nope', 'int main(){return 1;} int second(){}',
                 'int main(){return '+'('*80+'1'+')'*80+';}',
@@ -199,7 +208,7 @@ def main():
             assert content(disk,'loop') == old
             run(guest,'./cc loop.c loop.c',2)
             assert content(disk,'loop.c') == expected_files['loop.c']
-            for protected in ('cc','math_test','math.dll'):
+            for protected in ('cc','math_test','math.dll','c_runtime'):
                 before = content(disk,protected)
                 run(guest,f'./cc loop.c {protected}',4)
                 assert content(disk,protected) == before

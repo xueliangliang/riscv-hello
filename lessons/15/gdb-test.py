@@ -18,7 +18,9 @@ def check_gdb_output(output):
     compiler_size = Path('build/lesson15/cc.exec').stat().st_size - 48
     assert all(int(size)==compiler_size for name,hart,pc,size in entries if name==b'cc')
     assert all(pc==b'0x80500000' for name,hart,pc,size in entries if name==b'cc')
-    assert all(int(size)>=32768 and pc==b'0x80500090' for name,hart,pc,size in entries if name==b'native')
+    assert all(int(size)>=32768 and pc==b'0x80505000' for name,hart,pc,size in entries if name==b'native')
+    assert re.findall(rb'ACTUAL DLL EXPORT hart=([01]) argument=0x400a000000000000', output) == [b'1', b'0']
+    assert re.findall(rb'RUNTIME MODULE FENCE hart=([01])', output) == [b'1', b'0']
     assert b'PASS GDB: actual compiler and emitted program U entries' in output
 
 
@@ -31,6 +33,8 @@ def main():
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1',0))
                 port=sock.getsockname()[1]
+            from pack import symbols
+            runtime_symbols = symbols('build/lesson15/runtime15.elf')
             script=directory/'compiler.gdb'
             script.write_text(f'''set pagination off
 set confirm off
@@ -45,6 +49,8 @@ from decode import decode
 fences=[]
 receivers=[]
 entries=[]
+exports=[]
+module_fences=[]
 installed=set()
 pending=None
 failure=None
@@ -91,7 +97,7 @@ class NativeEntry(gdb.Breakpoint):
             print(gdb.execute('x/8i $pc',to_string=True))
             entries.append((name,hart))
             pending=None
-            return len(entries)==4
+            return False
         except Exception as error:
             failure=error
             return True
@@ -116,6 +122,53 @@ class Received(gdb.Breakpoint):
         except Exception as error:
             failure=error
             return True
+class ModuleFence(gdb.Breakpoint):
+    def stop(self):
+        global failure
+        try:
+            hart=entries[-1][1]
+            assert 'fence.i' in gdb.execute('x/5i $pc',to_string=True)
+            module_fences.append(hart)
+            print('RUNTIME MODULE FENCE hart=%d'%hart)
+            return False
+        except Exception as error:
+            failure=error
+            return True
+class Export(gdb.Breakpoint):
+    def stop(self):
+        global failure
+        try:
+            hart=entries[-1][1]
+            assert integer('$priv')==0
+            assert integer('$a0')==0x400a000000000000
+            print('ACTUAL DLL EXPORT hart=%d argument=%#x'%(hart,integer('$a0')))
+            print(gdb.execute('x/8i $pc',to_string=True))
+            exports.append(hart)
+            return len(exports)==2
+        except Exception as error:
+            failure=error
+            return True
+class Dispatch(gdb.Breakpoint):
+    def stop(self):
+        global failure
+        try:
+            target=integer('$a0')
+            assert integer('$a1')==1
+            banks={runtime_symbols['banks']}
+            assert banks <= target < banks+8192
+            dll=decode({str(disk)!r})['math.dll']['content']
+            offset=int.from_bytes(dll[48:52],'little')
+            assert memory(target,16)==dll[offset:offset+16]
+            if target not in installed:
+                Export('*%#x'%target,type=gdb.BP_HARDWARE_BREAKPOINT,internal=True)
+                installed.add(target)
+            print('VALIDATED API DISPATCH target=%#x'%target)
+            return False
+        except Exception as error:
+            failure=error
+            return True
+ModuleFence('*{runtime_symbols['module_fence']:#x}',internal=True)
+Dispatch('*{runtime_symbols['runtime_math_dispatch']:#x}',internal=True)
 Fence('application_fence',internal=True)
 Received('application_received',internal=True)
 end
@@ -125,6 +178,7 @@ assert failure is None,str(failure)
 assert entries==[('cc',1),('native',1),('cc',0),('native',0)],entries
 assert receivers==entries
 assert fences==[1,1,0,0]
+assert exports==[1,0] and module_fences==[1,0]
 print('PASS GDB: actual compiler and emitted program U entries, exact persisted payload, argv and both receiving-hart fences')
 end
 detach
@@ -134,7 +188,7 @@ quit
             try:
                 session.start([os.environ.get('GDB','gdb-multiarch'),'-q','-batch','-x',str(script)])
                 guest.until('15> ',10)
-                guest.send('fappend gdb.c <<EOF\r\nint main(){int a=9; while(a>3){a=a-1;} print_int(a*11111); return 26;}\r\nEOF\r\n')
+                guest.send('fappend gdb.c <<EOF\r\nint main(){int a=9; while(a>3){a=a-1;} print_int(a*11111); print_bits(ceil(3.25)); return 26;}\r\nEOF\r\n')
                 guest.until('raw target=0 result=')
                 guest.read()
                 for index in range(2):
@@ -152,8 +206,8 @@ quit
                         assert session.process.returncode==0,output
                         check_gdb_output(output)
                         for before,after in ((b'hart=1',b'hart=0'),(b'priv=0',b'priv=1'),
-                                             (b'pc=0x80500090',b'pc=0x80500094'),
-                                             (b'exact_payload=32768',b'exact_payload=0')):
+                                             (b'pc=0x80505000',b'pc=0x80505004'),
+                                             (b'exact_payload=53264',b'exact_payload=0')):
                             assert before in output
                             try:
                                 check_gdb_output(output.replace(before,after))
