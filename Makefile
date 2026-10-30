@@ -631,3 +631,48 @@ test-lesson12-gdb:
 	+$(MAKE) --no-print-directory lesson12
 	$(PYTHON) lessons/12/gdb-runner-test.py
 	QEMU="$(QEMU)" $(PYTHON) lessons/12/gdb-test.py
+
+# Lesson13: bounded full-data redo journal over the B+ tree filesystem.
+LOADER_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/13 -Ibuild/lesson13
+LOADER_COMMON := build/lesson13/start.o build/lesson13/runtime.o build/lesson13/trap.o build/lesson13/fs.o build/lesson13/journal.o build/lesson02/uart.o
+build/lesson13:
+	mkdir -p $@
+build/lesson13/%.o: lessons/13/%.S | build/lesson13
+	$(CC) $(LOADER_FLAGS) -c -o $@ $<
+build/lesson13/%.o: lessons/13/%.c $(wildcard lessons/13/*.h) | build/lesson13
+	$(CC) $(LOADER_FLAGS) -c -o $@ $<
+build/lesson13/user.elf: build/lesson13/user-start.o build/lesson13/user.o build/lesson13/filetest.o build/lesson13/syscall.o lessons/13/user.ld
+	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/user.ld -o $@ $(filter %.o,$^)
+build/lesson13/user-symbols.h: build/lesson13/user.elf lessons/13/symbols.py
+	$(PYTHON) lessons/13/symbols.py $(CROSS_COMPILE)nm $< $@
+build/lesson13/kernel.o: build/lesson13/user-symbols.h
+build/lesson13/kernel.elf: $(LOADER_COMMON) build/lesson13/block.o build/lesson13/kernel.o lessons/13/kernel.ld
+	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson13/block-no-flush.o: lessons/13/block.c lessons/13/block.h | build/lesson13
+	$(CC) $(LOADER_FLAGS) -DNO_FLUSH -c -o $@ $<
+build/lesson13/kernel-no-flush.elf: $(LOADER_COMMON) build/lesson13/block-no-flush.o build/lesson13/kernel.o lessons/13/kernel.ld
+	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson13/bootloader.elf: build/lesson13/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+build/lesson13/%.bin: build/lesson13/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+build/lesson13/disk.img: build/lesson13/kernel.bin build/lesson13/user.bin tools/make-disk-image.py lessons/13/format.py
+	$(PYTHON) lessons/13/format.py build/lesson13/kernel.bin build/lesson13/user.bin $@
+build/lesson13/disk-no-flush.img: build/lesson13/kernel-no-flush.bin build/lesson13/user.bin tools/make-disk-image.py lessons/13/format.py
+	$(PYTHON) lessons/13/format.py build/lesson13/kernel-no-flush.bin build/lesson13/user.bin $@
+.PHONY: lesson13 run-lesson13 reset-lesson13 test-lesson13 inspect-lesson13
+lesson13: build/lesson13/bootloader.elf build/lesson13/disk.img
+all: lesson13
+run-lesson13: lesson13
+	QEMU="$(QEMU)" $(PYTHON) lessons/13/run.py $(LESSON12_ARGS)
+reset-lesson13: lesson13
+	$(PYTHON) lessons/13/run.py --reset
+# --reset is explicit destructive replacement, protected by the same host lock.
+test-lesson13: lesson13
+	QEMU="$(QEMU)" $(PYTHON) lessons/13/test.py
+test: test-lesson13
+inspect-lesson13: build/lesson13/bootloader.elf build/lesson13/kernel.elf build/lesson13/user.elf
+	$(READELF) -h -lW $^
+	$(OBJDUMP) -d $^
+inspect: inspect-lesson13
