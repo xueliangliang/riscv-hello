@@ -276,9 +276,9 @@ static struct TrapFrame *schedule(int timer)
 }
 static int readable(unsigned long pointer, unsigned long length)
 {
-    /* No user pointer is used by lifecycle calls. WRITE alone accepts bytes
-       in shared image/data or the CALLER's own stack, using subtraction to
-       avoid pointer+length overflow. This is validation, not isolation. */
+    /* Admit one contiguous shared-image, own data/stack, or designated-app
+       region. EXEC/READFILE validate owner before calling this predicate.
+       Subtraction avoids pointer+length overflow; this is not isolation. */
     unsigned long low = STACK_BASE + current * STACK_SIZE;
     unsigned long high = low + STACK_SIZE;
     if (pointer >= USER_BASE && pointer < USER_DATA_END &&

@@ -81,6 +81,12 @@ def runtime(text,pids,dll,bank,alternate=False):
     return {'pids':pids,'harts':[p&1 for p in pids], 'calls':call_count,
             'module_bases':[bank,bank+4096]}
 
+def assert_cat(text,expected):
+    normalized=text.replace('\r','')
+    match=re.search(r'\n(.*?)\ncat target=0 result=0\n13> ',normalized,re.S)
+    assert match,'missing cat status/EOF'
+    assert match.group(1).encode()==expected,'cold guest content/EOF mismatch'
+
 def raw_disk(disk,app,dll,boot,saved=None):
     raw=disk.read_bytes()
     files=inspect(raw)['files']

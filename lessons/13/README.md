@@ -178,6 +178,11 @@ under `build/lesson13/`. `gdb-loader.log` proves receiving harts0/1 fence, U app
 entry, U module entry, local U module fence, full copied DLL bytes and exact
 `pointer=base+export_offset`; UART continues through shutdown after detach.
 
+The cold-content regression also boots a deliberately wrong persisted file:
+the old overwrite-first order admits it, while the new read-before-write gate
+rejects its actual guest output. This repairs an oracle gap, not a demonstrated
+kernel persistence defect.
+
 The evidence regression mutates name/signature/math/base/PID/status/hart/cold
 content and requires oracle rejection. It also runs real partial-output,
 nonzero, timeout and pre-collect-error children, verifies reaping, deliberately

@@ -12,7 +12,7 @@ import tempfile
 from guest import Guest
 from native import Native
 from vectors import negatives
-from oracle import runtime,raw_disk
+from oracle import runtime,raw_disk,assert_cat
 from pack import symbols
 from decode import decode
 
@@ -40,6 +40,9 @@ def application(g,pid):
     g.read(.8)
     g.cmd('exec math_test','exec target=0 result=-13') # ZOMBIE reservation
     g.cmd(f'wait {pid}',f'wait target={pid} result=37')
+
+def verify_cold_saved(g):
+    assert_cat(g.cmd('cat saved'),b'cold-loader-journal')
 
 def snapshot_native(disk):
     fs=Native(disk)
@@ -95,6 +98,9 @@ def main():
             g=start(f'cold-{cold}.log',disk)
             try:
                 g.cmd('ls','file: math.dll size=')
+                if cold:
+                    # Read persisted bytes BEFORE any same-value overwrite.
+                    verify_cold_saved(g)
                 g.cmd('exec missing','exec target=0 result=-10')
                 for i in range(len(apps)):
                     g.cmd(f'exec bad{i:02}.exec','exec target=0 result=-4')
@@ -112,7 +118,11 @@ def main():
                     g.cmd(f'wait {pid}',f'wait target={pid} result=7')
                 g.cmd('wait 17','wait target=17 result=-1')
                 g.cmd('fwrite saved cold-loader-journal','fwrite target=0 result=19')
-                g.cmd('cat saved','cold-loader-journal')
+                saved_text=g.cmd('cat saved')
+                assert_cat(saved_text,b'cold-loader-journal')
+                rejected(lambda:assert_cat(saved_text.replace('cold-loader-journal','WRONG-COLD-CONTENT'),
+                                           b'cold-loader-journal'))
+                mutation_count+=1
                 g.shutdown()
                 text=g.all.decode(errors='replace')
             finally:

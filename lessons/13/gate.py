@@ -57,6 +57,7 @@ def main():
               ('gate-loader-native',[sys.executable,'lessons/13/loader-test.py']),
               ('gate-binary',[sys.executable,'lessons/13/binary-test.py']),
               ('gate-runtime',[sys.executable,'lessons/13/test.py']),
+              ('gate-cold-oracle',[sys.executable,'lessons/13/cold-oracle-test.py']),
               ('gate-IO-U',[sys.executable,'lessons/13/io-test.py']),
               ('gate-launcher',[sys.executable,'lessons/13/launcher-test.py'])]
     stages=[stage(name,argv) for name,argv in commands]
