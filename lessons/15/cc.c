@@ -17,7 +17,7 @@ enum TokenKind {
 enum NodeKind {
     N_LITERAL = 300, N_LOCAL, N_STORE, N_POSITIVE, N_NEGATE, N_NOT,
     N_BLOCK, N_IF, N_WHILE, N_RETURN, N_PUTS, N_PRINT, N_EMPTY,
-    N_ITOD, N_DTOI, N_TRUTH, N_CALL, N_STRING, N_TEXT, N_FORMAT
+    N_ITOD, N_DTOI, N_TRUTH, N_CALL, N_STRING, N_TEXT, N_FORMAT, N_FORMAT_VALUE
 };
 struct Node {
     int kind;
@@ -482,7 +482,8 @@ static int format_call(void)
                 if (specifier == 's') {
                     part = text_node(nodes[argument].value, nodes[argument].third);
                 } else {
-                    part = node(N_CALL, argument, 0, specifier == 'd' ? API_INTEGER : API_FLOATING, 0);
+                    part = node(N_FORMAT_VALUE, 0, 0,
+                                specifier == 'd' ? API_INTEGER : API_FLOATING, used - 1);
                 }
             }
         }
@@ -496,7 +497,13 @@ static int format_call(void)
     if (used != count) {
         error("printf extra argument");
     }
-    return node(N_FORMAT, first, 0, 0, 0);
+    /* Keep evaluation order separate from the output-fragment list. Linking
+     * expression roots is safe: each is owned by this call, never shared with
+     * a statement list. Format values name saved operands, not expressions. */
+    for (unsigned index = 1; index < count; index++) {
+        nodes[arguments[index - 1]].next = arguments[index];
+    }
+    return node(N_FORMAT, first, count ? arguments[0] : 0, count, 0);
 }
 static int primary(void)
 {
@@ -883,9 +890,33 @@ static void generate_expression(int index)
         }
         runtime_call(current_node->third);
     } else if (kind == N_FORMAT) {
-        for (int child = current_node->left; child; child = nodes[child].next) {
-            generate_expression(child);
+        /* Evaluate every argument once, left-to-right, before any outer text.
+         * Use the existing bounded, 16-byte-aligned operand stack, not user
+         * locals or a global scratch bank that nested calls would overwrite.
+         * Runtime callees preserve sp and s0; outer arithmetic operands remain
+         * below these slots. Saved binary64/int64 bits are never converted. */
+        for (int argument = current_node->right; argument; argument = nodes[argument].next) {
+            if (nodes[argument].kind == N_STRING) {
+                literal(10, APP_BASE + RT_STRINGS + nodes[argument].value);
+            } else {
+                generate_expression(argument);
+            }
+            push();
         }
+        for (int child = current_node->left; child; child = nodes[child].next) {
+            if (nodes[child].kind == N_TEXT) {
+                generate_text(nodes[child].value, nodes[child].third);
+            } else {
+                unsigned offset = (current_node->third - 1 - nodes[child].value) * 16;
+                emit(immediate(offset, 2, 3, 10, 3));
+                if (nodes[child].third == API_INTEGER) {
+                    addi(11, 0, 0);
+                }
+                runtime_call(nodes[child].third);
+            }
+        }
+        addi(2, 2, current_node->third * 16);
+        evaluation_depth -= current_node->third;
         addi(10, 0, 0);
     } else if (kind == N_TEXT) {
         generate_text(current_node->value, current_node->third);

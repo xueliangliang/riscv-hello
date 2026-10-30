@@ -63,6 +63,7 @@ def main():
               ('gate-storage',[sys.executable,'lessons/15/store-test.py']),
               ('gate-runtime',[sys.executable,'lessons/15/compiler-test.py']),
               ('gate-floats',[sys.executable,'lessons/15/float-test.py']),
+              ('gate-printf',[sys.executable,'lessons/15/printf-test.py']),
               ('gate-template',[sys.executable,'lessons/15/template-test.py']),
               ('gate-module-negatives',[sys.executable,'lessons/15/module-negative-test.py']),
               ('gate-frontend',[sys.executable,'lessons/15/frontend-test.py']),
@@ -76,9 +77,11 @@ def main():
     assert result['status']=='PASS' and result['cold']['status']==23
     floating=json.loads((BUILD/'float-results.json').read_text())
     assert floating['status']=='PASS'
+    formatted=json.loads((BUILD/'printf-results.json').read_text())
+    assert formatted['status']=='PASS' and not formatted['errors']
     frontend=json.loads((BUILD/'frontend-all-results.json').read_text())
     assert frontend['status']=='PASS' and not frontend['errors']
-    (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result,'frontend':frontend,'floating':floating},indent=2)+'\n')
+    (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result,'frontend':frontend,'floating':floating,'printf':formatted},indent=2)+'\n')
     print('PASS complete lesson15 gate: real guest compiler/native/cold closure, atomic storage, IO, raw loss, mutations and launcher')
 
 if __name__=='__main__':

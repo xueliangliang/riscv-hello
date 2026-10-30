@@ -20,6 +20,12 @@ literals retain signed63-bit positive admission. No hexadecimal/suffixes.
 
 printf requires a literal format, at most8 typed arguments, exact format count,
 %d int64, %f double, %s string literal, %% only. No width/precision/varargs ABI.
+Every argument is evaluated once, left-to-right, and its full int64/binary64
+value is saved before the first outer format fragment is written. Nested
+printing therefore finishes during argument evaluation, not between outer
+fragments. These saved values use the bounded aligned evaluation stack, not
+hidden user locals; all256 local slots remain available. Nested calls and
+ordinary arithmetic share the same128 temporary-slot budget.
 %f prints six decimal places, rounds ties away in magnitude within |x|<1e9;
 larger finite magnitudes print <range>. nan/inf/-inf/-0.000000 are explicit.
 print_bits prints all16 hex digits and newline; print_int retains newline.
