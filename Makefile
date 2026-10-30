@@ -819,3 +819,120 @@ build/lesson14/cc.exec: build/lesson14/cc.elf lessons/14/pack.py
 inspect-lesson14: resource-lesson14
 resource-lesson14: lesson14
 	$(PYTHON) lessons/14/resource-test.py
+
+# Lesson15: bounded full-data redo journal over the B+ tree filesystem.
+SOFT_COMPILER_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/15 -Ibuild/lesson15
+SOFT_COMPILER_COMMON := build/lesson15/start.o build/lesson15/runtime.o build/lesson15/trap.o build/lesson15/fs.o build/lesson15/journal.o build/lesson02/uart.o
+build/lesson15:
+	mkdir -p $@
+build/lesson15/%.o: lessons/15/%.S | build/lesson15
+	$(CC) $(SOFT_COMPILER_FLAGS) -c -o $@ $<
+build/lesson15/%.o: lessons/15/%.c $(wildcard lessons/15/*.h) | build/lesson15
+	$(CC) $(SOFT_COMPILER_FLAGS) -c -o $@ $<
+build/lesson15/user.elf: build/lesson15/user-start.o build/lesson15/user.o build/lesson15/filetest.o build/lesson15/syscall.o lessons/15/user.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/user.ld -o $@ $(filter %.o,$^)
+build/lesson15/user-symbols.h: build/lesson15/user.elf lessons/15/symbols.py
+	$(PYTHON) lessons/15/symbols.py $(CROSS_COMPILE)nm $< $@
+build/lesson15/kernel.o: build/lesson15/user-symbols.h
+build/lesson15/kernel.elf: $(SOFT_COMPILER_COMMON) build/lesson15/block.o build/lesson15/kernel.o build/lesson15/formats.o build/lesson15/snapshot.o lessons/15/kernel.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson15/block-no-flush.o: lessons/15/block.c lessons/15/block.h | build/lesson15
+	$(CC) $(SOFT_COMPILER_FLAGS) -DNO_FLUSH -c -o $@ $<
+build/lesson15/kernel-no-flush.elf: $(SOFT_COMPILER_COMMON) build/lesson15/block-no-flush.o build/lesson15/kernel.o build/lesson15/formats.o build/lesson15/snapshot.o lessons/15/kernel.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson15/bootloader.elf: build/lesson15/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+build/lesson15/%.bin: build/lesson15/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+build/lesson15/disk.img: build/lesson15/kernel.bin build/lesson15/user.bin build/lesson15/math_test.exec build/lesson15/math.dll build/lesson15/cc.exec lessons/15/seed.py lessons/15/native.py tools/make-disk-image.py lessons/15/format.py
+	$(PYTHON) lessons/15/seed.py build/lesson15/kernel.bin build/lesson15/user.bin $@
+build/lesson15/disk-no-flush.img: build/lesson15/kernel-no-flush.bin build/lesson15/user.bin tools/make-disk-image.py lessons/15/format.py
+	$(PYTHON) lessons/15/format.py build/lesson15/kernel-no-flush.bin build/lesson15/user.bin $@
+.PHONY: lesson15 run-lesson15 reset-lesson15 test-lesson15 inspect-lesson15
+lesson15: build/lesson15/bootloader.elf build/lesson15/disk.img
+all: lesson15
+run-lesson15: lesson15
+	QEMU="$(QEMU)" $(PYTHON) lessons/15/run.py $(LESSON15_ARGS)
+reset-lesson15: lesson15
+	$(PYTHON) lessons/15/run.py --reset $(LESSON15_ARGS)
+# --reset is explicit destructive replacement, protected by the same host lock.
+test-lesson15:
+	QEMU="$(QEMU)" CC="$(CC)" $(PYTHON) lessons/15/gate.py
+test: test-lesson15
+inspect-lesson15: build/lesson15/bootloader.elf build/lesson15/kernel.elf build/lesson15/user.elf build/lesson15/math_test.elf build/lesson15/math.elf build/lesson15/cc.elf
+	$(READELF) -h -lW $(filter %.elf,$^)
+	$(OBJDUMP) -d $(filter %.elf,$^)
+inspect: inspect-lesson15
+
+# Pure PIC module and fixed-address ordinary-file application are NOT linked
+# into the kernel/shell. They enter runtime exclusively via filesystem reads.
+SOFT_DLL_FLAGS := $(filter-out -fno-pic,$(SOFT_COMPILER_FLAGS)) -fPIC -fvisibility=hidden
+build/lesson15/math_dll.o: lessons/15/math_dll.c | build/lesson15
+	$(CC) $(SOFT_DLL_FLAGS) -c -o $@ $<
+build/lesson15/math_alt.o: lessons/15/math_dll.c | build/lesson15
+	$(CC) $(SOFT_DLL_FLAGS) -DALTERNATE -c -o $@ $<
+build/lesson15/math.elf: build/lesson15/math_dll.o lessons/15/module.ld
+	$(CC) $(SOFT_DLL_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/module.ld -o $@ $<
+build/lesson15/math-alt.elf: build/lesson15/math_alt.o lessons/15/module.ld
+	$(CC) $(SOFT_DLL_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/module.ld -o $@ $<
+build/lesson15/math.dll: build/lesson15/math.elf lessons/15/pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson15/math.text
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/pack.py module $< build/lesson15/math.text $@
+build/lesson15/math-alt.dll: build/lesson15/math-alt.elf lessons/15/pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson15/math-alt.text
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/pack.py module $< build/lesson15/math-alt.text $@
+build/lesson15/math_test.elf: build/lesson15/app-start.o build/lesson15/math_test.o build/lesson15/module_loader.o build/lesson15/formats.o build/lesson15/syscall.o lessons/15/app.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/app.ld -o $@ $(filter %.o,$^)
+build/lesson15/math_test.exec: build/lesson15/math_test.elf lessons/15/pack.py
+	$(OBJCOPY) -O binary $< build/lesson15/math_test.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/pack.py executable $< build/lesson15/math_test.raw $@
+
+.PHONY: test-lesson15-gdb test-lesson15-evidence
+# No prerequisites: invalidate evidence BEFORE even a recursive build fails.
+test-lesson15-gdb:
+	@mkdir -p build/lesson15
+	$(PYTHON) lessons/15/fresh-log.py build/lesson15/gdb-loader.log
+	+$(MAKE) --no-print-directory lesson15
+	QEMU="$(QEMU)" $(PYTHON) lessons/15/gdb-test.py
+test-lesson15-evidence:
+	$(PYTHON) lessons/15/evidence-test.py
+
+build/lesson15/io_test.elf: build/lesson15/app-start.o build/lesson15/io_test.o build/lesson15/module_loader.o build/lesson15/formats.o build/lesson15/syscall.o lessons/15/app.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/15/app.ld -o $@ $(filter %.o,$^)
+build/lesson15/io_test.exec: build/lesson15/io_test.elf lessons/15/pack.py
+	$(OBJCOPY) -O binary $< build/lesson15/io_test.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/pack.py executable $< build/lesson15/io_test.raw $@
+
+
+# ABI2 compiler: static buffers have a larger memory bound, not a larger file.
+build/lesson15/integer-runtime.elf: build/lesson15/integer-runtime.o
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none,-Ttext=0,-e,integer_runtime_begin -o $@ $<
+build/lesson15/integer-runtime.h: build/lesson15/integer-runtime.elf lessons/15/runtime-pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson15/integer-runtime.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/runtime-pack.py $< build/lesson15/integer-runtime.raw $@
+build/lesson15/cc.o: build/lesson15/integer-runtime.h
+build/lesson15/cc.o: SOFT_COMPILER_FLAGS += -fstack-usage
+build/lesson15/cc.elf: build/lesson15/cc-start.o build/lesson15/cc.o build/lesson15/formats.o build/lesson15/syscall.o lessons/15/cc.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none,-Map,build/lesson15/cc.map -T lessons/15/cc.ld -o $@ $(filter %.o,$^)
+build/lesson15/cc.exec: build/lesson15/cc.elf lessons/15/pack.py
+	$(OBJCOPY) -O binary $< build/lesson15/cc.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/pack.py compiler $< build/lesson15/cc.raw $@
+
+.PHONY: resource-lesson15
+inspect-lesson15: resource-lesson15
+resource-lesson15: lesson15
+	$(PYTHON) lessons/15/resource-test.py
+
+# Explicit upstream builtin closure: no system libc or LP64D libgcc.
+SOFT_SOURCES := adddf3 subdf3 muldf3 divdf3 comparedf2 negdf2 fixdfdi fixunsdfdi floatdidf floatundidf floatsidf floatunsidf fixdfsi fixunsdfsi clzdi2 clzsi2 fp_mode
+SOFT_OBJECTS := $(addprefix build/lesson15/soft-,$(addsuffix .o,$(SOFT_SOURCES)))
+SOFT_HEADERS := $(wildcard lessons/15/softfloat/*.h lessons/15/softfloat/*.inc)
+build/lesson15/soft-%.o: lessons/15/softfloat/%.c $(SOFT_HEADERS) | build/lesson15
+	$(CC) $(SOFT_COMPILER_FLAGS) -Os -nostdinc -isystem $(shell $(CC) -print-file-name=include) -D_LIBC_LIMITS_H_ -c -o $@ $<
+build/lesson15/runtime15.elf: build/lesson15/runtime15.o build/lesson15/formats.o build/lesson15/module_loader.o build/lesson15/syscall.o $(SOFT_OBJECTS) lessons/15/runtime15.ld
+	$(CC) $(SOFT_COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none,-Map,build/lesson15/runtime15.map -T lessons/15/runtime15.ld -o $@ $(filter %.o,$^)
+build/lesson15/c_runtime: build/lesson15/runtime15.elf lessons/15/runtime15-pack.py
+	$(OBJCOPY) -O binary $< build/lesson15/runtime15.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/15/runtime15-pack.py $< build/lesson15/runtime15.raw $@
+build/lesson15/disk.img: build/lesson15/c_runtime
