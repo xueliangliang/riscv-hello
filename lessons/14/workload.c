@@ -7,6 +7,13 @@ long workload(unsigned operation)
     for (unsigned i = 0; i < sizeof(bytes); i++) {
         bytes[i] = (i * 37U + 19U) & 255U;
     }
+    if (operation == 14 || operation == 15) {
+        static unsigned char publication[8192];
+        for (unsigned index = 0; index < sizeof(publication); index++) {
+            publication[index] = (index * 29U + 7U) & 255U;
+        }
+        return fs_store("publish", publication, sizeof(publication), operation == 15);
+    }
     if (operation == 1) {
         return fs_open("split", FS_REPLACE);
     }

@@ -14,12 +14,11 @@ with tempfile.TemporaryDirectory(prefix='lesson14-launcher-',dir=os.environ.get(
     disk=Path(temp)/'persistent.img'
     g=Guest('launcher-first.log',str(disk),options=['make','--no-print-directory','run-lesson14',f'LESSON14_ARGS=--disk {disk}'])
     try:
-        g.until('13> ')
+        g.until('14> ')
         g.cmd('fwrite saved survives-build','fwrite target=0 result=14')
         for reset in (False,True):
-            argv=['python3','lessons/14/run.py','--disk',str(disk)]
-            if reset:
-                argv+=['--reset']
+            target='reset-lesson14' if reset else 'run-lesson14'
+            argv=['make','--no-print-directory',target,f'LESSON14_ARGS=--disk {disk}']
             p=subprocess.run(argv,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=4)
             assert p.returncode!=0 and b'disk busy:' in p.stdout,p.stdout
         g.shutdown()
@@ -31,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='lesson14-launcher-',dir=os.environ.get(
     assert digest(disk)==before
     g=Guest('launcher-second.log',str(disk),options=['python3','lessons/14/run.py','--disk',str(disk)])
     try:
-        g.until('13> ')
+        g.until('14> ')
         g.cmd('cat saved','survives-build')
         g.cmd('rm math_test','rm target=0 result=0')
         g.shutdown()
@@ -41,13 +40,13 @@ with tempfile.TemporaryDirectory(prefix='lesson14-launcher-',dir=os.environ.get(
     before=digest(disk)
     g=Guest('launcher-missing.log',str(disk),options=['python3','lessons/14/run.py','--disk',str(disk)])
     try:
-        g.until('13> ')
+        g.until('14> ')
         g.cmd('./math_test','exec target=0 result=-10')
         g.shutdown()
     finally:
         g.close()
     assert digest(disk)==before,'launcher reseeded missing executable'
-    subprocess.run(['python3','lessons/14/run.py','--disk',str(disk),'--reset'],check=True,stdout=subprocess.PIPE,timeout=5)
+    subprocess.run(['make','--no-print-directory','reset-lesson14',f'LESSON14_ARGS=--disk {disk}'],check=True,stdout=subprocess.PIPE,timeout=5)
     assert disk.read_bytes()==Path('build/lesson14/disk.img').read_bytes()
     # Existing invalid FS stays invalid, not silently reformatted.
     raw=bytearray(disk.read_bytes())

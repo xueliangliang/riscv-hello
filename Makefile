@@ -751,14 +751,14 @@ all: lesson14
 run-lesson14: lesson14
 	QEMU="$(QEMU)" $(PYTHON) lessons/14/run.py $(LESSON14_ARGS)
 reset-lesson14: lesson14
-	$(PYTHON) lessons/14/run.py --reset
+	$(PYTHON) lessons/14/run.py --reset $(LESSON14_ARGS)
 # --reset is explicit destructive replacement, protected by the same host lock.
 test-lesson14:
 	QEMU="$(QEMU)" CC="$(CC)" $(PYTHON) lessons/14/gate.py
 test: test-lesson14
-inspect-lesson14: build/lesson14/bootloader.elf build/lesson14/kernel.elf build/lesson14/user.elf build/lesson14/math_test.elf build/lesson14/math.elf
-	$(READELF) -h -lW $^
-	$(OBJDUMP) -d $^
+inspect-lesson14: build/lesson14/bootloader.elf build/lesson14/kernel.elf build/lesson14/user.elf build/lesson14/math_test.elf build/lesson14/math.elf build/lesson14/cc.elf
+	$(READELF) -h -lW $(filter %.elf,$^)
+	$(OBJDUMP) -d $(filter %.elf,$^)
 inspect: inspect-lesson14
 
 # Pure PIC module and fixed-address ordinary-file application are NOT linked

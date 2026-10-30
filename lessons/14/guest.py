@@ -55,17 +55,23 @@ class Guest:
     def until(self, text, seconds=5):
         data = ""
         end = time.monotonic() + seconds
-        while text not in data:
+        while not (text.search(data) if hasattr(text, 'search') else text in data):
             assert time.monotonic() < end, ("timeout FAIL", text, data[-2000:])
             data += self.read()
         return data + self.read(0.05)
 
     def send(self, text):
-        os.write(self.master, text if isinstance(text, bytes) else text.encode())
+        data = memoryview(text if isinstance(text, bytes) else text.encode())
+        while data:
+            written = os.write(self.master, data)
+            assert written > 0
+            data = data[written:]
 
     def cmd(self, text, expected=None, seconds=10):
         self.send(text + "\r")
-        data = self.until("\r\n13> ", seconds)
+        # A shell prompt may follow another hart's partial output. Redraws
+        # contain ESC[2K immediately before 14>, real prompts do not.
+        data = self.until(re.compile(r'(?<!\x1b\[2K)14> '), seconds)
         if expected is not None:
             assert expected in data, (expected, data)
         return data

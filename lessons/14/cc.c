@@ -292,7 +292,11 @@ static int primary(void)
         if (token != T_STRING) {
             error("puts requires a string literal");
         }
-        result = node(N_PUTS, 0, 0, token_string_size, token_value);
+        if (string_size == STRING_LIMIT) {
+            error("string data capacity exceeded");
+        }
+        strings[string_size++] = '\n';
+        result = node(N_PUTS, 0, 0, token_string_size + 1, token_value);
         lex();
         expect(')');
     } else if (keyword("print_int")) {
@@ -581,14 +585,6 @@ static void generate_expression(int index)
             remaining -= count;
             offset += count;
         }
-        addi(2, 2, -16);
-        addi(10, 0, 10);
-        store(10, 2, 0);
-        addi(10, 2, 0);
-        addi(11, 0, 1);
-        addi(17, 0, SYS_WRITE);
-        emit(0x73);
-        addi(2, 2, 16);
         addi(10, 0, 0);
     } else {
         generate_expression(current_node->left);
@@ -711,7 +707,8 @@ static unsigned compile(void)
     if (INTEGER_RUNTIME_VERSION != 1 || INTEGER_RUNTIME_SIZE != sizeof(integer_runtime) ||
         INTEGER_PRINT_OFFSET < 32 || INTEGER_PRINT_OFFSET >= INTEGER_RUNTIME_SIZE ||
         load32(integer_runtime + 8) != 1 || load32(integer_runtime + 12) != INTEGER_RUNTIME_SIZE ||
-        load32(integer_runtime + 16) != INTEGER_PRINT_OFFSET) {
+        load32(integer_runtime + 16) != INTEGER_PRINT_OFFSET || load32(integer_runtime + 20) ||
+        load32(integer_runtime + 24) || load32(integer_runtime + 28)) {
         error("integer runtime prefix mismatch");
     }
     const char *magic = "RVINT14";

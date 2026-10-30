@@ -340,12 +340,20 @@ static void execute(char *line)
         vector[0] = (const char *)(USER_DATA_END - 1);
         /* Reject an interval crossing vector before touching any contents. */
         require(syscall3(SYS_EXEC, (unsigned long)"cc", 4, (unsigned long)vector) == E_ARG, "FAIL malformed vector\n");
+        vector[0] = "";
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, (unsigned long)vector) == E_ARG, "FAIL empty argument\n");
+        vector[0] = (const char *)(STACK_BASE + STACK_SIZE);
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, (unsigned long)vector) == E_ARG, "FAIL other-stack argument\n");
+        *(char *)(PASTE_BASE + PASTE_SIZE - 1) = 'x';
+        vector[0] = (const char *)(PASTE_BASE + PASTE_SIZE - 1);
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, (unsigned long)vector) == E_ARG, "FAIL NUL prefix crossing interval\n");
         require(syscall3(SYS_STORE, 0, 0, 0) == E_OWNER, "FAIL shell STORE ownership\n");
         say("PASS shell argv admission, no partial publication\n");
     } else if (equal(line, "help")) {
         say("help echo ps/jobs run spin|sleep|exit [arg] kill pid wait pid sleep ticks stats shutdown\n");
         say("exec NAME or ./NAME loads an ordinary-file RVEXEC1 application\n");
         say("ls fwrite NAME TEXT cat/fread NAME rm NAME fsinfo fappend NAME TEXT\n");
+        say("fappend NAME <<END collects raw bytes; terminator required even after Ctrl-C/D\n");
         say("fseek NAME OFFSET [TEXT] ftruncate NAME SIZE defrag\n");
         say("fstest [create|delete|recreate] fsverify fspressure fsnodes (fresh test disks only)\n");
     } else if (equal(line, "ls")) {

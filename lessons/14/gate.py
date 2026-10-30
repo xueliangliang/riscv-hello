@@ -51,20 +51,21 @@ def main():
             path.unlink()
     (BUILD/'gdb-loader.log').write_bytes(b'')
     cc=os.environ.get('CC','riscv64-linux-gnu-gcc')
-    commands=[('gate-build',['make','--no-print-directory','-B','lesson14',
-                             'build/lesson14/math-alt.dll','build/lesson14/io_test.exec',f'CC={cc}']),
-              ('gate-parsers',[sys.executable,'lessons/14/vectors.py']),
-              ('gate-loader-native',[sys.executable,'lessons/14/loader-test.py']),
-              ('gate-binary',[sys.executable,'lessons/14/binary-test.py']),
-              ('gate-runtime',[sys.executable,'lessons/14/test.py']),
-              ('gate-cold-oracle',[sys.executable,'lessons/14/cold-oracle-test.py']),
-              ('gate-IO-U',[sys.executable,'lessons/14/io-test.py']),
+    commands=[('gate-build',['make','--no-print-directory','-B','lesson14', f'CC={cc}']),
+              ('gate-resources',[sys.executable,'lessons/14/resource-test.py']),
+              ('gate-formats',[sys.executable,'lessons/14/vectors.py']),
+              ('gate-legacy-module',[sys.executable,'lessons/14/loader-test.py']),
+              ('gate-storage',[sys.executable,'lessons/14/store-test.py']),
+              ('gate-runtime',[sys.executable,'lessons/14/compiler-test.py']),
+              ('gate-IO-U',[sys.executable,'lessons/14/compiler-io-test.py']),
+              ('gate-raw-loss',[sys.executable,'lessons/14/raw-loss-test.py']),
+              ('gate-mutants',[sys.executable,'lessons/14/mutant-test.py']),
               ('gate-launcher',[sys.executable,'lessons/14/launcher-test.py'])]
     stages=[stage(name,argv) for name,argv in commands]
     result=json.loads((BUILD/'runtime-results.json').read_text())
-    assert result['status']=='PASS' and len(result['cold'])==2
+    assert result['status']=='PASS' and result['cold']['status']==23
     (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result},indent=2)+'\n')
-    print('PASS complete lesson14 gate: independent native, real U execution, raw cold files, rebinding and launcher')
+    print('PASS complete lesson14 gate: real guest compiler/native/cold closure, atomic storage, IO, raw loss, mutations and launcher')
 
 if __name__=='__main__':
     main()

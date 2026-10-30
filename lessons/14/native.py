@@ -22,6 +22,11 @@ class Native:
             'fs_read':([c.c_long,c.c_void_p,c.c_uint],c.c_long),
             'fs_close':([c.c_long],c.c_long),
             'fs_remove':([c.c_char_p],c.c_long),
+            'fs_store':([c.c_char_p,c.c_void_p,c.c_uint,c.c_int],c.c_long),
+            'fs_sync':([],c.c_int),
+            'model_cut':([],None),
+            'model_trace_count':([],c.c_uint),
+            'model_trace':([c.c_uint,c.c_int],c.c_uint),
             'snapshot_read':([c.c_char_p,c.c_void_p,c.c_uint],c.c_long)}
         for name,(args,result) in signatures.items():
             fn=getattr(self.lib,name)
