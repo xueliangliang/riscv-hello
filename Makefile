@@ -715,3 +715,107 @@ build/lesson13/io_test.elf: build/lesson13/app-start.o build/lesson13/io_test.o 
 build/lesson13/io_test.exec: build/lesson13/io_test.elf lessons/13/pack.py
 	$(OBJCOPY) -O binary $< build/lesson13/io_test.raw
 	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/13/pack.py executable $< build/lesson13/io_test.raw $@
+
+# Lesson14: bounded full-data redo journal over the B+ tree filesystem.
+COMPILER_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/14 -Ibuild/lesson14
+COMPILER_COMMON := build/lesson14/start.o build/lesson14/runtime.o build/lesson14/trap.o build/lesson14/fs.o build/lesson14/journal.o build/lesson02/uart.o
+build/lesson14:
+	mkdir -p $@
+build/lesson14/%.o: lessons/14/%.S | build/lesson14
+	$(CC) $(COMPILER_FLAGS) -c -o $@ $<
+build/lesson14/%.o: lessons/14/%.c $(wildcard lessons/14/*.h) | build/lesson14
+	$(CC) $(COMPILER_FLAGS) -c -o $@ $<
+build/lesson14/user.elf: build/lesson14/user-start.o build/lesson14/user.o build/lesson14/filetest.o build/lesson14/syscall.o lessons/14/user.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/user.ld -o $@ $(filter %.o,$^)
+build/lesson14/user-symbols.h: build/lesson14/user.elf lessons/14/symbols.py
+	$(PYTHON) lessons/14/symbols.py $(CROSS_COMPILE)nm $< $@
+build/lesson14/kernel.o: build/lesson14/user-symbols.h
+build/lesson14/kernel.elf: $(COMPILER_COMMON) build/lesson14/block.o build/lesson14/kernel.o build/lesson14/formats.o build/lesson14/snapshot.o lessons/14/kernel.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson14/block-no-flush.o: lessons/14/block.c lessons/14/block.h | build/lesson14
+	$(CC) $(COMPILER_FLAGS) -DNO_FLUSH -c -o $@ $<
+build/lesson14/kernel-no-flush.elf: $(COMPILER_COMMON) build/lesson14/block-no-flush.o build/lesson14/kernel.o build/lesson14/formats.o build/lesson14/snapshot.o lessons/14/kernel.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/kernel.ld -o $@ $(filter %.o,$^)
+build/lesson14/bootloader.elf: build/lesson14/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
+build/lesson14/%.bin: build/lesson14/%.elf
+	$(OBJCOPY) -O binary $< $@
+	test "$$(stat -c %s $@)" -le 65536
+build/lesson14/disk.img: build/lesson14/kernel.bin build/lesson14/user.bin build/lesson14/math_test.exec build/lesson14/math.dll build/lesson14/cc.exec lessons/14/seed.py lessons/14/native.py tools/make-disk-image.py lessons/14/format.py
+	$(PYTHON) lessons/14/seed.py build/lesson14/kernel.bin build/lesson14/user.bin $@
+build/lesson14/disk-no-flush.img: build/lesson14/kernel-no-flush.bin build/lesson14/user.bin tools/make-disk-image.py lessons/14/format.py
+	$(PYTHON) lessons/14/format.py build/lesson14/kernel-no-flush.bin build/lesson14/user.bin $@
+.PHONY: lesson14 run-lesson14 reset-lesson14 test-lesson14 inspect-lesson14
+lesson14: build/lesson14/bootloader.elf build/lesson14/disk.img
+all: lesson14
+run-lesson14: lesson14
+	QEMU="$(QEMU)" $(PYTHON) lessons/14/run.py $(LESSON14_ARGS)
+reset-lesson14: lesson14
+	$(PYTHON) lessons/14/run.py --reset
+# --reset is explicit destructive replacement, protected by the same host lock.
+test-lesson14:
+	QEMU="$(QEMU)" CC="$(CC)" $(PYTHON) lessons/14/gate.py
+test: test-lesson14
+inspect-lesson14: build/lesson14/bootloader.elf build/lesson14/kernel.elf build/lesson14/user.elf build/lesson14/math_test.elf build/lesson14/math.elf
+	$(READELF) -h -lW $^
+	$(OBJDUMP) -d $^
+inspect: inspect-lesson14
+
+# Pure PIC module and fixed-address ordinary-file application are NOT linked
+# into the kernel/shell. They enter runtime exclusively via filesystem reads.
+INTEGER_DLL_FLAGS := $(filter-out -fno-pic,$(COMPILER_FLAGS)) -fPIC -fvisibility=hidden
+build/lesson14/math_dll.o: lessons/14/math_dll.c | build/lesson14
+	$(CC) $(INTEGER_DLL_FLAGS) -c -o $@ $<
+build/lesson14/math_alt.o: lessons/14/math_dll.c | build/lesson14
+	$(CC) $(INTEGER_DLL_FLAGS) -DALTERNATE -c -o $@ $<
+build/lesson14/math.elf: build/lesson14/math_dll.o lessons/14/module.ld
+	$(CC) $(INTEGER_DLL_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/module.ld -o $@ $<
+build/lesson14/math-alt.elf: build/lesson14/math_alt.o lessons/14/module.ld
+	$(CC) $(INTEGER_DLL_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/module.ld -o $@ $<
+build/lesson14/math.dll: build/lesson14/math.elf lessons/14/pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson14/math.text
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/14/pack.py module $< build/lesson14/math.text $@
+build/lesson14/math-alt.dll: build/lesson14/math-alt.elf lessons/14/pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson14/math-alt.text
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/14/pack.py module $< build/lesson14/math-alt.text $@
+build/lesson14/math_test.elf: build/lesson14/app-start.o build/lesson14/math_test.o build/lesson14/module_loader.o build/lesson14/formats.o build/lesson14/syscall.o lessons/14/app.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/app.ld -o $@ $(filter %.o,$^)
+build/lesson14/math_test.exec: build/lesson14/math_test.elf lessons/14/pack.py
+	$(OBJCOPY) -O binary $< build/lesson14/math_test.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/14/pack.py executable $< build/lesson14/math_test.raw $@
+
+.PHONY: test-lesson14-gdb test-lesson14-evidence
+# No prerequisites: invalidate evidence BEFORE even a recursive build fails.
+test-lesson14-gdb:
+	@mkdir -p build/lesson14
+	$(PYTHON) lessons/14/fresh-log.py build/lesson14/gdb-loader.log
+	+$(MAKE) --no-print-directory lesson14
+	QEMU="$(QEMU)" $(PYTHON) lessons/14/gdb-test.py
+test-lesson14-evidence:
+	$(PYTHON) lessons/14/evidence-test.py
+
+build/lesson14/io_test.elf: build/lesson14/app-start.o build/lesson14/io_test.o build/lesson14/module_loader.o build/lesson14/formats.o build/lesson14/syscall.o lessons/14/app.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/14/app.ld -o $@ $(filter %.o,$^)
+build/lesson14/io_test.exec: build/lesson14/io_test.elf lessons/14/pack.py
+	$(OBJCOPY) -O binary $< build/lesson14/io_test.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/14/pack.py executable $< build/lesson14/io_test.raw $@
+
+
+# ABI2 compiler: static buffers have a larger memory bound, not a larger file.
+build/lesson14/integer-runtime.elf: build/lesson14/integer-runtime.o
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none,-Ttext=0,-e,integer_runtime_begin -o $@ $<
+build/lesson14/integer-runtime.h: build/lesson14/integer-runtime.elf lessons/14/runtime-pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson14/integer-runtime.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/14/runtime-pack.py $< build/lesson14/integer-runtime.raw $@
+build/lesson14/cc.o: build/lesson14/integer-runtime.h
+build/lesson14/cc.o: COMPILER_FLAGS += -fstack-usage
+build/lesson14/cc.elf: build/lesson14/cc-start.o build/lesson14/cc.o build/lesson14/formats.o build/lesson14/syscall.o lessons/14/cc.ld
+	$(CC) $(COMPILER_FLAGS) -nostdlib -static -Wl,--build-id=none,-Map,build/lesson14/cc.map -T lessons/14/cc.ld -o $@ $(filter %.o,$^)
+build/lesson14/cc.exec: build/lesson14/cc.elf lessons/14/pack.py
+	$(OBJCOPY) -O binary $< build/lesson14/cc.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/14/pack.py compiler $< build/lesson14/cc.raw $@
+
+.PHONY: resource-lesson14
+inspect-lesson14: resource-lesson14
+resource-lesson14: lesson14
+	$(PYTHON) lessons/14/resource-test.py

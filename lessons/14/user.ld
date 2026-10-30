@@ -25,7 +25,6 @@ SECTIONS
     } :data
     .bss (NOLOAD) : ALIGN(16) {
         __user_bss_start = .;
-        *(.bss .bss.* .sbss .sbss.* COMMON)
         . = ALIGN(16);
         __user_bss_end = .;
     } :data
@@ -40,5 +39,18 @@ SECTIONS
         __user_stacks_end = .;
     } :data
     ASSERT(__user_stacks_end == 0x80410000, "eight independent stack budget")
+    .appstack 0x80410000 (NOLOAD) : {
+        . += 65536;
+        __app_stack_end = .;
+    } :data
+    .paste 0x80420000 (NOLOAD) : {
+        *(.paste)
+        . = ALIGN(16);
+        *(.bss .bss.* .sbss .sbss.* COMMON)
+        . = ALIGN(16);
+        __paste_end = .;
+    } :data
+    ASSERT(__app_stack_end == 0x80420000, "ABI2 stack budget")
+    ASSERT(__paste_end <= 0x80424000, "shell raw workspace budget")
     /DISCARD/ : { *(.comment .riscv.attributes .eh_frame*) }
 }

@@ -16,6 +16,7 @@ if __name__=='__main__':
         fs=Native(staging)
         fs.put('math_test',Path('build/lesson14/math_test.exec').read_bytes())
         fs.put('math.dll',Path('build/lesson14/math.dll').read_bytes())
+        fs.put('cc',Path('build/lesson14/cc.exec').read_bytes())
         fs.save(staging)
         os.replace(staging,target)
     finally:

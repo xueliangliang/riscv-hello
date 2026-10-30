@@ -51,4 +51,5 @@ long fs_remove(const char *name);
 long fs_list_page(struct FileEntry *entries, unsigned capacity, struct ListCursor *cursor);
 long fs_defrag(void);
 void fs_info(void);
+long fs_store(const char *name, const void *buffer, unsigned count, int append);
 #endif

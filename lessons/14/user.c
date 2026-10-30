@@ -3,6 +3,23 @@
 #define HISTORY 4
 static char history[HISTORY][LINE];
 static int history_count;
+static int previous_cr;
+static unsigned long command_drop_baseline;
+static unsigned char paste[8192 + 33] __attribute__((section(".paste")));
+
+/* One CRLF state is shared by command editor and raw body reader. */
+static int input_byte(void)
+{
+    for (;;) {
+        int byte = syscall2(SYS_READ, 0, 0);
+        if (previous_cr && byte == '\n') {
+            previous_cr = 0;
+            continue;
+        }
+        previous_cr = byte == '\r';
+        return byte == '\r' ? '\n' : byte;
+    }
+}
 static const char *commands[] = {
     "help", "echo", "ps", "jobs", "run", "kill", "wait", "sleep", "stats", "shutdown", "ls", "fwrite", "cat", "rm", "fsinfo", "fstest", "fsverify", "fappend", "fseek", "ftruncate", "fread", "defrag", "fspressure", "fsnodes", "exec"
 };
@@ -60,7 +77,7 @@ static long parse(const char *s)
 }
 static void redraw(char *line, int cursor)
 {
-    say("\r\033[2K13> ");
+    say("\r\033[2K14> ");
     say(line);
     for (int i = cursor; line[i]; i++) {
         say("\033[D");
@@ -68,7 +85,7 @@ static void redraw(char *line, int cursor)
 }
 static void read_line(char *line)
 {
-    static int previous_cr;
+
     char draft[LINE];
     int used = 0;
     int cursor = 0;
@@ -77,14 +94,11 @@ static void read_line(char *line)
     int delete_sequence = 0;
     line[0] = 0;
     draft[0] = 0;
-    say("13> ");
+    /* Boot's zero-loss baseline covers bytes already queued BEFORE this
+     * command, not just drops occurring after raw mode is entered. */
+    say("14> ");
     for (;;) {
-        int c = syscall2(SYS_READ, 0, 0);
-        if (previous_cr && c == '\n') {
-            previous_cr = 0;
-            continue;
-        }
-        previous_cr = 0;
+        int c = input_byte();
         if (escape == 1) {
             escape = c == '[' ? 2 : 0;
             continue;
@@ -129,7 +143,6 @@ static void read_line(char *line)
             continue;
         }
         if (c == '\r' || c == '\n') {
-            previous_cr = c == '\r';
             say("\n");
             if (used) {
                 if (history_count == HISTORY) {
@@ -203,6 +216,70 @@ static void text_line(const char *prefix, const char *value)
     text[used] = 0;
     say(text);
 }
+static void raw_append(const char *name, const char *delimiter)
+{
+    unsigned delimiter_size = length(delimiter);
+    if (!delimiter_size || delimiter_size > 31) {
+        say("raw: invalid delimiter\n");
+        return;
+    }
+    for (unsigned index = 0; index < delimiter_size; index++) {
+        if (delimiter[index] < 33 || delimiter[index] > 126) {
+            say("raw: invalid delimiter\n");
+            return;
+        }
+    }
+    unsigned used = 0;
+    unsigned line_start = 0;
+    unsigned line_size = 0;
+    int matches = 1;
+    int rejected = 0;
+    say("raw: collecting (terminator required even after cancellation)\n");
+    for (;;) {
+        int byte = input_byte();
+        if (byte == '\n') {
+            if (matches && line_size == delimiter_size) {
+                used = line_start;
+                break;
+            }
+            if (used < sizeof(paste)) {
+                paste[used++] = '\n';
+            } else {
+                rejected = 1;
+            }
+            if (used > 8192) {
+                rejected = 1;
+            }
+            line_start = used;
+            line_size = 0;
+            matches = 1;
+            continue;
+        }
+        if ((byte < 32 && byte != '\t') || byte == 127) {
+            rejected = 1;
+        }
+        if (line_size >= delimiter_size || byte != (unsigned char)delimiter[line_size]) {
+            matches = 0;
+        }
+        if (line_size < 32) {
+            line_size++;
+        }
+        if (used < sizeof(paste)) {
+            paste[used++] = byte;
+        } else {
+            rejected = 1;
+        }
+    }
+    if ((unsigned long)syscall2(SYS_RX_DROPS, 0, 0) != command_drop_baseline) {
+        rejected = 1;
+    }
+    if (rejected) {
+        say("raw: rejected; drained; unchanged\n");
+        return;
+    }
+    long value = used ? syscall3(SYS_APPEND_FILE, (unsigned long)name, (unsigned long)paste, used) : 0;
+    result("raw", 0, value);
+}
 static void execute(char *line)
 {
     char *arg = line;
@@ -219,8 +296,52 @@ static void execute(char *line)
         return;
     }
     if (equal(line, "exec") || (line[0] == '.' && line[1] == '/')) {
-        const char *name = line[0] == '.' ? line + 2 : arg;
-        result("exec", 0, syscall2(SYS_EXEC, (unsigned long)name, 0));
+        char *arguments[5] = {0};
+        char *next = line[0] == '.' ? line + 2 : arg;
+        unsigned count = 0;
+        if (line[0] == '.') {
+            arguments[count++] = next;
+            next = arg;
+        }
+        while (*next && count < 4) {
+            arguments[count++] = next;
+            while (*next && *next != ' ') {
+                next++;
+            }
+            if (*next) {
+                *next++ = 0;
+            }
+            while (*next == ' ') {
+                next++;
+            }
+        }
+        long value = E_ARG;
+        if (count && !*next) {
+            value = count == 1 ? syscall2(SYS_EXEC, (unsigned long)arguments[0], 0) :
+                    syscall3(SYS_EXEC, (unsigned long)arguments[0], count, (unsigned long)arguments);
+        }
+        result("exec", 0, value);
+    } else if (equal(line, "abitest")) {
+        char overlong[49];
+        for (unsigned index = 0; index < 48; index++) {
+            overlong[index] = 'a';
+        }
+        overlong[48] = 0;
+        const char *vector[5] = {"cc", "a.c", "out", 0, 0};
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 5, (unsigned long)vector) == E_ARG, "FAIL argc bound\n");
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 0, (unsigned long)vector) == E_ARG, "FAIL zero argv reserved\n");
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, (unsigned long)vector + 1) == E_ARG, "FAIL argv alignment\n");
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, USER_DATA_END - 8) == E_ARG, "FAIL argv crossing interval\n");
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, STACK_BASE + STACK_SIZE) == E_ARG, "FAIL argv other stack\n");
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, (unsigned long)vector) == E_ARG, "FAIL argv terminator\n");
+        vector[0] = overlong;
+        vector[1] = 0;
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 1, (unsigned long)vector) == E_ARG, "FAIL arg length\n");
+        vector[0] = (const char *)(USER_DATA_END - 1);
+        /* Reject an interval crossing vector before touching any contents. */
+        require(syscall3(SYS_EXEC, (unsigned long)"cc", 4, (unsigned long)vector) == E_ARG, "FAIL malformed vector\n");
+        require(syscall3(SYS_STORE, 0, 0, 0) == E_OWNER, "FAIL shell STORE ownership\n");
+        say("PASS shell argv admission, no partial publication\n");
     } else if (equal(line, "help")) {
         say("help echo ps/jobs run spin|sleep|exit [arg] kill pid wait pid sleep ticks stats shutdown\n");
         say("exec NAME or ./NAME loads an ordinary-file RVEXEC1 application\n");
@@ -307,6 +428,10 @@ static void execute(char *line)
         if (*text) {
             *text++ = 0;
         }
+        if (equal(line, "fappend") && text[0] == '<' && text[1] == '<') {
+            raw_append(arg, text + 2);
+            return;
+        }
         long h = file_open(arg, equal(line, "fappend") ? FS_RW : FS_REPLACE);
         long value = h;
         if (h >= 0) {
@@ -389,6 +514,7 @@ void worker_main(long entry, long argument, volatile struct UserData *data)
         user_exit(23);
     }
     require(syscall2(SYS_READFILE, 0, 0) == E_OWNER, "FAIL snapshot owner before pointer\n");
+    require(syscall3(SYS_STORE, 0, 0, 0) == E_OWNER, "FAIL store owner before pointer\n");
     require(syscall2(SYS_WRITE, 0x80500000, 1) == E_ARG, "FAIL worker app pointer\n");
     require(syscall2(SYS_EXEC, 0, 0) == E_OWNER, "FAIL exec owner before pointer\n");
     require(syscall2(FS_OPEN, 0, FS_REPLACE) == E_OWNER, "FAIL file owner before pointer\n");

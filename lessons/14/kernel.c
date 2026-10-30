@@ -26,7 +26,7 @@ static unsigned long remote_kills;
 static struct TrapFrame idle_frames[2];
 static unsigned long idle_stacks[2][32] __attribute__((aligned(16)));
 #define EXTERNAL_CAUSE ((1UL << 63) | 9UL)
-#define RX_CAPACITY 128
+#define RX_CAPACITY 16384
 static unsigned char rx_ring[RX_CAPACITY];
 static unsigned long rx_head, rx_tail, rx_count;
 static unsigned long rx_dropped, rx_received, external_irqs, read_blocks, read_wakes;
@@ -162,8 +162,13 @@ static long launch(int slot, int entry, long argument)
     process->owner = -1;
     process->entry = entry;
     unsigned long bottom = STACK_BASE + slot * STACK_SIZE;
-    clear_bytes(bottom, bottom + STACK_SIZE);
-    process->frame.x[2] = bottom + STACK_SIZE;
+    unsigned long stack_size = STACK_SIZE;
+    if (entry == WORK_FILE && file_image.abi == 2) {
+        bottom = APP_STACK_BASE;
+        stack_size = APP_STACK_SIZE;
+    }
+    clear_bytes(bottom, bottom + stack_size);
+    process->frame.x[2] = bottom + stack_size;
     process->frame.x[10] = entry;
     process->frame.x[11] = argument;
     unsigned long data_address = DATA_BASE + slot * DATA_SIZE;
@@ -182,7 +187,7 @@ static long launch(int slot, int entry, long argument)
     /* UXL=64, SPP=0, SPIE=1; sret enables interrupts only in U mode. */
     process->frame.status = 0x200000020UL;
     /* Publish READY only after stack, data and all 288 context bytes exist. */
-    process->state = READY;
+    process->state = entry == WORK_FILE ? FREE : READY;
     event("spawn", process->pid, entry);
     return process->pid;
 }
@@ -281,6 +286,14 @@ static int readable(unsigned long pointer, unsigned long length)
        Subtraction avoids pointer+length overflow; this is not isolation. */
     unsigned long low = STACK_BASE + current * STACK_SIZE;
     unsigned long high = low + STACK_SIZE;
+    if (current == file_slot && file_image.abi == 2) {
+        low = APP_STACK_BASE;
+        high = low + APP_STACK_SIZE;
+    }
+    if (current == 0 && pointer >= PASTE_BASE && pointer < PASTE_BASE + PASTE_SIZE &&
+        length <= PASTE_BASE + PASTE_SIZE - pointer) {
+        return 1;
+    }
     if (pointer >= USER_BASE && pointer < USER_DATA_END &&
         length <= USER_DATA_END - pointer) {
         return 1;
@@ -320,8 +333,33 @@ static long exec_file(unsigned long pointer, unsigned long second, unsigned long
     if (current != 0) {
         return E_OWNER;
     }
-    if (second || third) {
+    if (second > 4 || (!second && third) || (second && (!third || (third & 7))) ||
+        (second && !readable(third, (second + 1) * sizeof(unsigned long)))) {
         return E_ARG;
+    }
+    char arguments[4][48];
+    unsigned argument_lengths[4];
+    if (second) {
+        const unsigned long *vector = (const unsigned long *)third;
+        if (vector[second]) {
+            return E_ARG;
+        }
+        for (unsigned index = 0; index < second; index++) {
+            unsigned length;
+            for (length = 0; length < 48; length++) {
+                if (!readable(vector[index], length + 1)) {
+                    return E_ARG;
+                }
+                arguments[index][length] = ((const char *)vector[index])[length];
+                if (!arguments[index][length]) {
+                    break;
+                }
+            }
+            if (!length || length == 48) {
+                return E_ARG;
+            }
+            argument_lengths[index] = length + 1;
+        }
     }
     char name[32];
     if (!user_name(pointer, name)) {
@@ -348,7 +386,10 @@ static long exec_file(unsigned long pointer, unsigned long second, unsigned long
     if (!executable_valid(file_staging, size, &candidate)) {
         return E_ARG;
     }
-    clear_bytes(APP_BASE, APP_BASE + APP_LIMIT);
+    if (candidate.abi == 1 && second) {
+        return E_ARG;
+    }
+    clear_bytes(APP_BASE, APP_BASE + candidate.memory);
     for (unsigned i = 0; i < candidate.payload; i++) {
         ((unsigned char *)APP_BASE)[i] = file_staging[EXEC_HEADER + i];
     }
@@ -359,6 +400,22 @@ static long exec_file(unsigned long pointer, unsigned long second, unsigned long
     long pid = launch(slot, WORK_FILE, 0);
     if (pid < 0) {
         file_slot = -1;
+    } else if (candidate.abi == 2) {
+        unsigned long data_address = DATA_BASE + slot * DATA_SIZE;
+        unsigned long *vector = (unsigned long *)data_address;
+        unsigned offset = 40;
+        for (unsigned index = 0; index < second; index++) {
+            vector[index] = data_address + offset;
+            for (unsigned byte = 0; byte < argument_lengths[index]; byte++) {
+                ((char *)data_address)[offset++] = arguments[index][byte];
+            }
+        }
+        vector[second] = 0;
+        processes[slot].frame.x[10] = second;
+        processes[slot].frame.x[11] = data_address;
+    }
+    if (pid >= 0) {
+        processes[slot].state = READY;
     }
     return pid;
 }
@@ -481,6 +538,31 @@ static long syscall(struct Process *process, int *reschedule)
         return file_syscall(number, first, second, process->frame.x[12]);
     }
     switch (number) {
+    case SYS_RX_DROPS:
+        return current == 0 ? (long)rx_dropped : E_OWNER;
+    case SYS_STORE:
+    case SYS_APPEND_FILE: {
+        if ((number == SYS_STORE && (file_slot < 0 || current != file_slot)) ||
+            (number == SYS_APPEND_FILE && current != 0)) {
+            return E_OWNER;
+        }
+        unsigned long count = process->frame.x[12];
+        char name[32];
+        if (count > APP_LIMIT || !readable(second, count) || !user_name(first, name)) {
+            return E_ARG;
+        }
+        const char *protected_names[] = {"cc", "math_test", "math.dll"};
+        for (unsigned index = 0; index < 3; index++) {
+            unsigned byte = 0;
+            while (name[byte] && name[byte] == protected_names[index][byte]) {
+                byte++;
+            }
+            if (!name[byte] && !protected_names[index][byte]) {
+                return E_OWNER;
+            }
+        }
+        return fs_store(name, (const void *)second, count, number == SYS_APPEND_FILE);
+    }
     case SYS_EXEC:
         return exec_file(first, second, process->frame.x[12]);
     case SYS_READFILE:
@@ -657,8 +739,13 @@ struct TrapFrame *trap_dispatch(struct TrapFrame *frame)
         fail("exclusive RUNNING ownership");
     }
     unsigned long low = STACK_BASE + current * STACK_SIZE;
+    unsigned long stack_size = STACK_SIZE;
+    if (current == file_slot && file_image.abi == 2) {
+        low = APP_STACK_BASE;
+        stack_size = APP_STACK_SIZE;
+    }
     if ((frame->status & 256UL) != 0 || frame->x[2] < low ||
-        frame->x[2] > low + STACK_SIZE || (frame->x[2] & 15UL) != 0) {
+        frame->x[2] > low + stack_size || (frame->x[2] & 15UL) != 0) {
         fail("trap privilege or stack");
     }
     process->frame = *frame;
@@ -722,6 +809,7 @@ void supervisor_main(unsigned long id, unsigned long stack_top)
             fail("filesystem mount rejected (never autoformat)");
         }
         clear_bytes(U___USER_BSS_START, U___USER_BSS_END);
+        clear_bytes(PASTE_BASE, PASTE_BASE + PASTE_SIZE);
         /* 16550 DLAB clear, FIFO enabled/reset, RX trigger one byte. */
         serial[3] = 3;
         serial[2] = 7;

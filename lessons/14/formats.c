@@ -22,18 +22,21 @@ int executable_valid(const unsigned char *p, unsigned long size, struct Executab
     uint32_t entry = load32(p + 20);
     uint32_t memory = load32(p + 28);
     uint32_t code = load32(p + 36);
+    uint32_t abi = load32(p + 32);
     if (load32(p + 8) != 1 || load32(p + 12) != size ||
         payload != size - EXEC_HEADER || load32(p + 24) != APP_BASE ||
-        load32(p + 32) != 1 || load32(p + 40) || load32(p + 44)) {
+        (abi != 1 && abi != 2) || load32(p + 40) || load32(p + 44)) {
         return 0;
     }
-    if (code < 2 || (code & 1) || code > payload || payload > memory || memory > APP_LIMIT ||
+    unsigned memory_limit = abi == 1 ? APP_LIMIT : APP_MEMORY_LIMIT;
+    if (code < 2 || (code & 1) || code > payload || payload > memory || memory > memory_limit ||
         (payload & 15) || (memory & 15) || entry > code - 2 || (entry & 1)) {
         return 0;
     }
     out->payload = payload;
     out->entry = entry;
     out->memory = memory;
+    out->abi = abi;
     return 1;
 }
 int export_matches(const unsigned char *field, const char *name)

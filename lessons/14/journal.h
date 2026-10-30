@@ -1,6 +1,8 @@
 #ifndef REDO12_H
 #define REDO12_H
+#ifndef J_CAPACITY
 #define J_CAPACITY 1024U
+#endif
 #define J_HEADER 12288U
 #define J_DESC (J_HEADER + 1U)
 #define J_IMAGES (J_DESC + 16U)

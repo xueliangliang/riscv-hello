@@ -1059,3 +1059,47 @@ long fs_defrag(void)
     }
     return transaction_end(mutate_defrag());
 }
+
+/* Compose internal mutations under ONE outer transaction. */
+long fs_store(const char *name, const void *buffer, unsigned count, int append)
+{
+    if (name_length(name) < 0 || count > 65536 || (append != 0 && append != 1)) {
+        return F_ARG;
+    }
+    if (!healthy) {
+        return F_IO;
+    }
+    if (append && count == 0) {
+        return 0;
+    }
+    if (transaction_begin()) {
+        return F_IO;
+    }
+    unsigned mode = append && lookup(name) ? FS_RW : FS_REPLACE;
+    long token = mutate_open(name, mode);
+    long result = token;
+    if (token >= 0) {
+        unsigned done = 0;
+        result = 0;
+        while (done < count) {
+            unsigned chunk = count - done;
+            if (chunk > 4096) {
+                chunk = 4096;
+            }
+            long written = append ? mutate_append(token, (const unsigned char *)buffer + done, chunk) :
+                                   mutate_write(token, (const unsigned char *)buffer + done, chunk);
+            if (written < 0) {
+                result = written;
+                break;
+            }
+            done += chunk;
+        }
+        /* Private close without fs_sync while journal is active. On error
+         * transaction_end restores the complete pre-call handle snapshot. */
+        handle(token)->live = 0;
+        if (result >= 0) {
+            result = count;
+        }
+    }
+    return transaction_end(result);
+}

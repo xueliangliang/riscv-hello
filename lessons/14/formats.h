@@ -3,6 +3,7 @@
 #include <stdint.h>
 #define APP_BASE 0x80500000UL
 #define APP_LIMIT 65536U
+#define APP_MEMORY_LIMIT 1048576U
 #define EXEC_HEADER 48U
 #define DLL_LIMIT 4096U
 #define DLL_UNARY 1U
@@ -11,6 +12,7 @@ struct Executable {
     uint32_t payload;
     uint32_t entry;
     uint32_t memory;
+    uint32_t abi;
 };
 uint32_t load32(const unsigned char *bytes);
 int executable_valid(const unsigned char *bytes, unsigned long size, struct Executable *out);

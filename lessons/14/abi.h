@@ -7,6 +7,10 @@
 #define USER_DATA_END 0x80407000UL
 #define DATA_BASE 0x80407000UL
 #define DATA_SIZE 256UL
+#define APP_STACK_BASE 0x80410000UL
+#define APP_STACK_SIZE 65536UL
+#define PASTE_BASE 0x80420000UL
+#define PASTE_SIZE 16384UL
 /* Explicit per-instance data, NOT compiler-relocated .data/.bss globals. */
 struct UserData {
     unsigned long counter;
@@ -29,6 +33,9 @@ struct UserData {
 #define SYS_STATS 16
 #define SYS_EXEC 30
 #define SYS_READFILE 31
+#define SYS_STORE 32
+#define SYS_APPEND_FILE 33
+#define SYS_RX_DROPS 34
 #define WORK_FILE 4
 #define FREE 0
 #define READY 1
