@@ -28,3 +28,23 @@ a console transaction. Runtime-address breakpoints are scoped to the actual
 native image lifetime so overlaid cc code cannot satisfy or spuriously trip a
 runtime checkpoint; generated argc/argv checks now launch explicit copied args
 rather than incorrectly expecting argv from the documented zero/zero call.
+
+The Q1 six-decimal formatter regression (`formatter-test.py`, included in the
+ordinary gate) compares full ordered input bits and output against an independent
+exact-rational oracle. Its 216 finite vectors include all four reported Q1 inputs,
+both signs of all three magnitudes, decimal midpoint neighbors, genuine binary
+ties, carry boundaries, signed zeros, tiny/subnormal values, the range limit and
+128 deterministic wide-exponent random inputs. Three nonfinite cases and two
+fail-closed format/type rejection attempts are separate. This is a bounded
+sample, not exhaustive binary64 verification. Inputs use exact integer conversion
+and power-of-two division so the staged decimal parser is not the oracle.
+
+The identical regression was executed first against an archive of
+`60558eb137378c841b831ddf1526e824bd39ab49`, with unchanged compiler/runtime
+sources and their whole-file hashes recorded. All valid programs compiled and
+executed with status0 and were WAIT/reaped, but the full-output oracle exited1
+on three batches, including the four reported Q1 cases. Exact integer scaling of
+the decoded binary64 significand repairs the manufactured-midpoint defect;
+it does not change the frozen tie-away, range, NaN, infinity or negative-zero
+policies, runtime ABI or resource budgets. Old/new transcripts, hashes and the
+new exact-SHA full-gate receipt live in the writer's scratch evidence, not here.

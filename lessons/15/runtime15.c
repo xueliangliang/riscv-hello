@@ -109,6 +109,32 @@ long rt_bits(double value)
     }
     return 0;
 }
+/* The caller has already admitted a finite magnitude below 1e9. Decode its
+ * exact value as significand / 2^shift; here shift is at least 23. Multiplying
+ * that value in binary64 first can round a non-tie onto a decimal midpoint.
+ * A 53-bit significand times 1e6 fits in 73 bits, so integer arithmetic keeps
+ * every bit until the one required six-decimal rounding decision. */
+static unsigned long rounded_millionths(unsigned long magnitude)
+{
+    unsigned exponent = magnitude >> 52;
+    unsigned long significand = magnitude & 0x000fffffffffffffUL;
+    unsigned shift = 1074;
+    if (exponent) {
+        significand |= 0x0010000000000000UL;
+        shift = 1075 - exponent;
+    }
+    unsigned __int128 product = (unsigned __int128)significand * 1000000;
+    /* Zero, subnormals and sufficiently tiny normals round to zero. Guard
+     * before either shift: C shifts by the type width or more are undefined. */
+    if (shift >= 128) {
+        return 0;
+    }
+    unsigned long quotient = product >> shift;
+    /* For a power-of-two denominator, the highest discarded bit is exactly
+     * the remainder >= half test. Equality rounds away in magnitude too. */
+    unsigned round_up = (product >> (shift - 1)) & 1;
+    return quotient + round_up;
+}
 long rt_floating(double value)
 {
     rt_guard();
@@ -130,7 +156,7 @@ long rt_floating(double value)
         say("<range>");
         return 0;
     }
-    unsigned long scaled = (unsigned long)(value * 1000000.0 + 0.5);
+    unsigned long scaled = rounded_millionths(magnitude);
     unsigned_decimal(scaled / 1000000);
     character('.');
     unsigned long fraction = scaled % 1000000;
