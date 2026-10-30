@@ -6,6 +6,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import time
 BUILD=Path('build/lesson15')
 
 def children_of(parent):
@@ -24,6 +25,7 @@ def children_of(parent):
         children=expanded
 
 def stage(name,argv,timeout=180):
+    started=time.monotonic()
     child=subprocess.Popen(argv,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
     try:
         output,_=child.communicate(timeout=timeout)
@@ -40,7 +42,7 @@ def stage(name,argv,timeout=180):
     sys.stdout.buffer.write(output)
     sys.stdout.buffer.flush()
     assert child.returncode==0,(name,child.returncode)
-    return {'name':name,'argv':argv,'exit':child.returncode}
+    return {'name':name,'argv':argv,'exit':child.returncode,'elapsed_seconds':time.monotonic()-started}
 
 def main():
     BUILD.mkdir(parents=True,exist_ok=True)

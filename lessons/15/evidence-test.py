@@ -7,7 +7,8 @@ import sys
 import tempfile
 import time
 from debugger import DebuggerSession
-from gate import stage
+from gate import stage, children_of
+import signal
 BUILD=Path('build/lesson15')
 BUILD.mkdir(parents=True,exist_ok=True)
 EVIDENCE=Path(tempfile.mkdtemp(prefix='lesson15-evidence-',dir=os.environ.get('TMPDIR')))
@@ -58,20 +59,40 @@ with tempfile.TemporaryDirectory(prefix='lesson15-evidence-',dir=os.environ.get(
     (EVIDENCE/'outer-partial-timeout.log').write_bytes((BUILD/'gate-timeout-regression.log').read_bytes())
 
 # These are actual public make targets, not a mocked fresh-log function.
-def run(name,target,env=None,success=True):
+def run(name,target,env=None,success=True,timeout=180):
     settings=os.environ.copy()
     settings.update(env or {})
     argv=['make','--no-print-directory',target]
     if env and 'CC' in env:
         argv.append('CC='+env['CC'])
-    child=subprocess.run(argv,env=settings,
-                         stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=180)
+    child=subprocess.Popen(argv,env=settings,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    try:
+        output,_=child.communicate(timeout=timeout)
+    except BaseException:
+        for pid in sorted(children_of(child.pid),reverse=True):
+            try:
+                os.kill(pid,signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        output,_=child.communicate()
+        (EVIDENCE/(name+'.log')).write_bytes(output)
+        assert child.poll() is not None
+        raise
     # Keep failure evidence outside build: the next outer gate invalidates it.
-    (EVIDENCE/(name+'.log')).write_bytes(child.stdout)
+    (EVIDENCE/(name+'.log')).write_bytes(output)
     if (BUILD/'gdb-loader.log').exists():
         (EVIDENCE/(name+'-debugger.log')).write_bytes((BUILD/'gdb-loader.log').read_bytes())
-    assert (child.returncode==0)==success,(name,child.returncode,child.stdout[-3000:])
+    assert (child.returncode==0)==success,(name,child.returncode,output[-3000:])
 
+# Timeout the actual recursive make entry, retaining partial binary output and
+# killing/draining/reaping its real child tree before trying another gate.
+try:
+    run('recursive-make-timeout','test-lesson15',timeout=.2)
+except subprocess.TimeoutExpired:
+    pass
+else:
+    raise AssertionError('recursive make timeout accepted')
+assert (EVIDENCE/'recursive-make-timeout.log').read_bytes()
 (BUILD/'gdb-loader.log').write_bytes(b'STALE PASS GDB\n')
 (BUILD/'results.json').write_text('{"status":"PASS"}')
 run('wrong-cc','test-lesson15',{'CC':'/bin/false'},False)
@@ -90,7 +111,10 @@ run('real-before-fake','test-lesson15-gdb')
 assert b'PASS GDB:' in (BUILD/'gdb-loader.log').read_bytes()
 run('fake-true','test-lesson15-gdb',{'GDB':'/bin/true'},False)
 assert b'PASS GDB:' not in (BUILD/'gdb-loader.log').read_bytes()
-run('restored-runtime','test-lesson15')
+# The expanded lesson15 suite has independently measured ~220 seconds of
+# bounded real guest work (not the old integer-only lesson14 suite). Only this
+# outer aggregate budget is360s; individual stage and debugger bounds stay fixed.
+run('restored-runtime','test-lesson15',timeout=360)
 run('restored-real-gdb','test-lesson15-gdb')
 assert b'PASS GDB:' in (BUILD/'gdb-loader.log').read_bytes()
 (BUILD/'evidence-results.json').write_text('{"status":"PASS","wrong_CC":true,"early_setup":true,"fake_GDB":true,"partial_timeout_and_reap":true,"restored_real_GDB":true}\n')
