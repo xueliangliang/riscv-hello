@@ -9,14 +9,40 @@ Unsupported syntax is an error, not skipped input.
 Statements: blocks, `int name [= expression];`, expression statements, `;`,
 `if (expression) statement [else statement]`, `while (expression) statement`,
 `return expression;`. Nested lexical scopes allow shadowing, not duplicate names
-in one scope. Reading a declared but uninitialized local yields zero.
+in one scope. A declaration without an initializer stores zero each time execution
+reaches it, including every loop iteration. A new local's binding begins before
+its initializer: any reference to that local inside its own initializer is an
+error, including assignment to it. Thus `int x=x+1;` and `int x=(x=1);` are
+rejected, even when an outer `x` exists; they never read an earlier loop lifetime
+or fall back to the outer binding. Ordinary shadowing (`{int x=19;}`) is allowed.
 Expressions: decimal integer literals, locals, assignment (right associative),
 parentheses, unary `+ - !`, `* / %`, `+ -`, `< <= > >=`, `== !=` (usual precedence).
-Operands evaluate left to right. Assignment requires a local lvalue.
+Operands evaluate left to right. Assignment requires a local lvalue: bare `x`
+and parenthesized `(x)` are assignable, but unary `+x`, `-x`, `!x` and assignment
+results are values, not lvalues. Unary plus still accepts ordinary integer
+operands and preserves their value. For example, `y=x=+17` is valid, but
+`(+x)=42` is not.
 `puts("literal")` prints the literal plus LF; `print_int(expression)` prints the
 full signed 64-bit value plus LF. Both return zero. String escapes are
 `\n \r \t \\ \"`; raw non-ASCII bytes are allowed only inside strings/comments.
 Line and block comments are accepted. Strings are not integer values.
+
+## Lexical boundaries
+
+Punctuators use maximal munch, not whichever split happens to parse. Supported
+two-character operators are `== != <= >=`. Unsupported C multi-character
+punctuators are rejected as one token: `++ -- -> += -= *= /= %= << >> <<= >>=
+&& || &= |= ^= ## ...` and digraphs `<: :> <% %> %: %:%:`. Other unsupported
+characters (for example `& | ^ ~ . # : [ ] ?`) are errors too. In particular,
+there is no increment/decrement operation: `++x`, `x++`, `1++2`, `--x`, `x--`,
+`1--2`, `x+++1` and `x---1` cannot be reinterpreted as supported expressions.
+Whitespace or a comment separates tokens: `+ +x`, `x + +1`, `x - -1` and
+`x + /*comment*/ +1` remain valid. Different adjacent single-character tokens
+without a longer punctuator remain valid, for example `x+-1` and `x=+1`.
+Comments are consumed before operator recognition; operator-like bytes inside
+comments/strings are not tokens. Digraphs are rejected, not alternate braces.
+
+## Integer semantics and limits
 
 Teaching `int` is signed 64 bit, NOT ISO C int. Arithmetic wraps modulo 2^64;
 signed comparison uses two's complement. Division/remainder follow RV64M:

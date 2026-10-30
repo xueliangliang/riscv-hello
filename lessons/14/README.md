@@ -63,6 +63,12 @@ comparison operators, if/else, while, return, comments, string escapes,
 ISO printf. Unsupported syntax is diagnosed, not skipped. Literal overflow,
 EOF, parse/code/stack/workspace limits all fail before output publication.
 Syntax errors and missing sources preserve the entire old output or absence.
+Parenthesized locals are assignable; unary plus produces a value, not an lvalue.
+Unsupported `++`/`--` and other C multi-character punctuators are rejected with
+maximal munch, never silently split into different valid arithmetic. Whitespace
+and comments still separate supported unary/binary operators. Each `int x;`
+declaration resets its local to zero; references to a declaring local in its own
+initializer (including assignment and shadowing) are rejected explicitly.
 The compiler refuses identical source/output names; the kernel publication
 API additionally protects `cc`, `math_test` and `math.dll`.
 
@@ -119,6 +125,7 @@ make test-lesson14
 make inspect-lesson14
 make test-lesson14-gdb
 make test-lesson14-evidence
+python3 lessons/14/frontend-fail-first.py
 make all test inspect
 make test-lesson07-gdb test-lesson08-gdb test-lesson09-gdb
 make test-lesson10-gdb test-lesson11-gdb test-lesson12-gdb
@@ -133,6 +140,21 @@ division/remainder, zero divisors, INT64_MIN/-1 and wrapping arithmetic; indepen
 expectations use exact integers, never float division. Larger programs emit over
 a page of code. Scope, spelling, precedence, branch and string variations are
 covered, alongside negative compiler output preservation and raw input boundaries.
+
+`frontend-test.py` is included in the ordinary gate: 80 invalid real U-mode
+compilations across lvalues, increment, decrement, initializers and other
+unsupported punctuators check exact line/type/token diagnostics, nonzero exit,
+no success banner, full old executable/source preservation and missing-output
+absence. Fifteen valid compile/execute/reap recovery runs check parenthesized
+assignment, spaced/comment-separated unary signs, right-associative assignment,
+scope, per-iteration zero initialization and full-width integers. Boot bytes,
+clean journal and raw filesystem invariants are checked independently. Thirty-five
+mutations of captured evidence attack the new rejection oracle.
+`frontend-fail-first.py` builds the unchanged `dba51e6` archive in scratch and
+runs the identical regression separately for lvalue, increment, decrement and
+self-initializer defects; all four must fail with actual old compiler status0,
+old-file overwrite and missing-file creation, not just changed diagnostic text.
+Its receipt/logs remain in the printed scratch archive. No old history is edited.
 
 Native tests exercise actual C store/append, deterministic rollback, all journal
 cut phases and both persisted/nonpersisted I/O-error outcomes. A reduced-capacity
@@ -153,6 +175,8 @@ Artifacts under `build/lesson14/`: `results.json`, `runtime-results.json`,
 `resource-results.json`, `store-results.json`, `mutation-results.json`,
 `compiler-uart.log`, `compiler-cold.log`, `compiler-verified.img`, `raw-loss.log`,
 `io-compiler-*.log`, `gdb-loader.log`, and launcher/mutant transcripts.
+`frontend-all-results.json` and `frontend-all-uart.log` record the focused
+regressions; the outer `results.json` also includes their results.
 The evidence gate rejects wrong CC, early debugger setup and fake GDB, retains
 partial/timeout child output, reaps children, then restores actual runtime/GDB
 checks. Attack transcripts are retained in `$TMPDIR/lesson14-evidence/`.

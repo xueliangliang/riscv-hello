@@ -57,6 +57,7 @@ def main():
               ('gate-legacy-module',[sys.executable,'lessons/14/loader-test.py']),
               ('gate-storage',[sys.executable,'lessons/14/store-test.py']),
               ('gate-runtime',[sys.executable,'lessons/14/compiler-test.py']),
+              ('gate-frontend',[sys.executable,'lessons/14/frontend-test.py']),
               ('gate-IO-U',[sys.executable,'lessons/14/compiler-io-test.py']),
               ('gate-raw-loss',[sys.executable,'lessons/14/raw-loss-test.py']),
               ('gate-mutants',[sys.executable,'lessons/14/mutant-test.py']),
@@ -64,7 +65,9 @@ def main():
     stages=[stage(name,argv) for name,argv in commands]
     result=json.loads((BUILD/'runtime-results.json').read_text())
     assert result['status']=='PASS' and result['cold']['status']==23
-    (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result},indent=2)+'\n')
+    frontend=json.loads((BUILD/'frontend-all-results.json').read_text())
+    assert frontend['status']=='PASS' and not frontend['errors']
+    (BUILD/'results.json').write_text(json.dumps({'status':'PASS','stages':stages,'runtime':result,'frontend':frontend},indent=2)+'\n')
     print('PASS complete lesson14 gate: real guest compiler/native/cold closure, atomic storage, IO, raw loss, mutations and launcher')
 
 if __name__=='__main__':

@@ -15,7 +15,7 @@ enum TokenKind {
     T_END = 256, T_NAME, T_NUMBER, T_STRING, T_EQ, T_NE, T_LE, T_GE
 };
 enum NodeKind {
-    N_LITERAL = 300, N_LOCAL, N_STORE, N_NEGATE, N_NOT,
+    N_LITERAL = 300, N_LOCAL, N_STORE, N_POSITIVE, N_NEGATE, N_NOT,
     N_BLOCK, N_IF, N_WHILE, N_RETURN, N_PUTS, N_PRINT, N_EMPTY
 };
 struct Node {
@@ -31,6 +31,7 @@ struct Symbol {
     char name[32];
     unsigned scope;
     unsigned slot;
+    unsigned initializing;
 };
 static char source[SOURCE_LIMIT + 1];
 static struct Node nodes[NODE_LIMIT];
@@ -107,6 +108,37 @@ static int letter(unsigned byte)
 static int digit(unsigned byte)
 {
     return byte >= '0' && byte <= '9';
+}
+static void reject_unsupported_operator(unsigned start)
+{
+    /* Maximal munch applies before expression parsing. Never reinterpret ++
+     * as two unary/binary + tokens. Whitespace and comments separate tokens.
+     * Longest spellings precede their prefixes (including C digraphs). */
+    static const char *const unsupported[] = {
+        "%:%:", "<<=", ">>=", "...", "++", "--", "->", "+=", "-=", "*=",
+        "/=", "%=", "<<", ">>", "&&", "||", "&=", "|=", "^=", "##",
+        "<:", ":>", "<%", "%>", "%:"
+    };
+    for (unsigned index = 0; index < sizeof(unsupported) / sizeof(unsupported[0]); index++) {
+        const char *spelling = unsupported[index];
+        unsigned length = 0;
+        while (spelling[length] && start + length < source_size &&
+               source[start + length] == spelling[length]) {
+            length++;
+        }
+        if (!spelling[length]) {
+            char message[64];
+            const char *prefix = "unsupported operator token ";
+            unsigned used = 0;
+            while (*prefix) {
+                message[used++] = *prefix++;
+            }
+            for (unsigned byte = 0; byte <= length; byte++) {
+                message[used + byte] = spelling[byte];
+            }
+            error(message);
+        }
+    }
 }
 static void lex(void)
 {
@@ -216,6 +248,7 @@ static void lex(void)
         token = T_STRING;
         return;
     }
+    reject_unsupported_operator(position - 1);
     if ((byte == '=' || byte == '!' || byte == '<' || byte == '>') &&
         position < source_size && source[position] == '=') {
         position++;
@@ -260,6 +293,11 @@ static unsigned find_local(const char *name)
 {
     for (unsigned index = symbol_count; index > 0; index--) {
         if (same(symbols[index - 1].name, name)) {
+            /* The new declaration already shadows an outer name, but cannot
+             * read OR assign its own slot until its initializer is complete. */
+            if (symbols[index - 1].initializing) {
+                error("local referenced in its own initializer");
+            }
             return symbols[index - 1].slot;
         }
     }
@@ -279,9 +317,10 @@ static int primary(void)
         int operation = token;
         lex();
         result = primary();
-        if (operation != '+') {
-            result = node(operation == '-' ? N_NEGATE : N_NOT, result, 0, 0, 0);
-        }
+        /* Unary + preserves the value, not the operand's lvalue category.
+         * Parentheses alone deliberately retain the underlying N_LOCAL. */
+        int kind = operation == '+' ? N_POSITIVE : operation == '-' ? N_NEGATE : N_NOT;
+        result = node(kind, result, 0, 0, 0);
     } else if (token == '(') {
         lex();
         result = expression(1);
@@ -406,6 +445,7 @@ static int statement(void)
         }
         symbol->scope = scope;
         symbol->slot = local_count++;
+        symbol->initializing = 1;
         unsigned slot = symbol->slot;
         lex();
         int initializer = node(N_LITERAL, 0, 0, 0, 0);
@@ -413,6 +453,7 @@ static int statement(void)
             lex();
             initializer = expression(1);
         }
+        symbol->initializing = 0;
         expect(';');
         result = node(N_STORE, initializer, 0, 0, slot);
     } else if (keyword("if") || keyword("while")) {
@@ -562,11 +603,11 @@ static void generate_expression(int index)
     } else if (kind == N_STORE) {
         generate_expression(current_node->left);
         store(10, 8, current_node->value * 8);
-    } else if (kind == N_NEGATE || kind == N_NOT) {
+    } else if (kind == N_POSITIVE || kind == N_NEGATE || kind == N_NOT) {
         generate_expression(current_node->left);
         if (kind == N_NEGATE) {
             emit(0x40a00533);
-        } else {
+        } else if (kind == N_NOT) {
             emit(immediate(1, 10, 3, 10, 0x13));
         }
     } else if (kind == N_PRINT) {
