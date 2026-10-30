@@ -27,6 +27,9 @@ struct UserData {
 #define SYS_READ 14
 #define SYS_PS 15
 #define SYS_STATS 16
+#define SYS_EXEC 30
+#define SYS_READFILE 31
+#define WORK_FILE 4
 #define FREE 0
 #define READY 1
 #define RUNNING 2

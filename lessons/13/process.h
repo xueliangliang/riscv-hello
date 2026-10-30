@@ -17,6 +17,7 @@ struct Process {
     int affinity;
     int owner;
     int kill_pending;
+    int instruction_pending;
 };
 extern struct Process processes[TASK_SLOTS];
 struct Hart {

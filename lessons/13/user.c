@@ -4,7 +4,7 @@
 static char history[HISTORY][LINE];
 static int history_count;
 static const char *commands[] = {
-    "help", "echo", "ps", "jobs", "run", "kill", "wait", "sleep", "stats", "shutdown", "ls", "fwrite", "cat", "rm", "fsinfo", "fstest", "fsverify", "fappend", "fseek", "ftruncate", "fread", "defrag", "fspressure", "fsnodes"
+    "help", "echo", "ps", "jobs", "run", "kill", "wait", "sleep", "stats", "shutdown", "ls", "fwrite", "cat", "rm", "fsinfo", "fstest", "fsverify", "fappend", "fseek", "ftruncate", "fread", "defrag", "fspressure", "fsnodes", "exec"
 };
 static int length(const char *s)
 {
@@ -218,7 +218,10 @@ static void execute(char *line)
     if (!*line) {
         return;
     }
-    if (equal(line, "help")) {
+    if (equal(line, "exec") || (line[0] == '.' && line[1] == '/')) {
+        const char *name = line[0] == '.' ? line + 2 : arg;
+        result("exec", 0, syscall2(SYS_EXEC, (unsigned long)name, 0));
+    } else if (equal(line, "help")) {
         say("help echo ps/jobs run spin|sleep|exit [arg] kill pid wait pid sleep ticks stats shutdown\n");
         say("ls fwrite NAME TEXT cat/fread NAME rm NAME fsinfo fappend NAME TEXT\n");
         say("fseek NAME OFFSET [TEXT] ftruncate NAME SIZE defrag\n");
@@ -384,6 +387,9 @@ void worker_main(long entry, long argument, volatile struct UserData *data)
         sleep_ticks(argument);
         user_exit(23);
     }
+    require(syscall2(SYS_READFILE, 0, 0) == E_OWNER, "FAIL snapshot owner before pointer\n");
+    require(syscall2(SYS_WRITE, 0x80500000, 1) == E_ARG, "FAIL worker app pointer\n");
+    require(syscall2(SYS_EXEC, 0, 0) == E_OWNER, "FAIL exec owner before pointer\n");
     require(syscall2(FS_OPEN, 0, FS_REPLACE) == E_OWNER, "FAIL file owner before pointer\n");
     require(syscall2(FS_INFO, 0, 0) == E_OWNER, "FAIL file owner diagnostic\n");
     user_exit(argument);
