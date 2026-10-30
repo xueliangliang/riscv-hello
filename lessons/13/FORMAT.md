@@ -11,9 +11,11 @@ The ELF files are host inspection/link intermediates only.
 to payload, 24 load address=0x80500000, 28 memory bytes (payload+BSS),
 32 ABI=1, 36 code bytes, 40 reserved=0, 44 reserved=0.
 Payload immediately follows. File bytes must equal 48+payload, with no trailing
-bytes. Nonempty code <= payload <= memory <=65536, payload and memory multiples
-of 16, entry even and strictly inside code. Entry ABI is `void app_main(void)`;
-application startup calls it and exits with its return status (0..255).
+bytes, and the whole file must fit65536 bytes. Code bytes are even and at least2;
+code <= payload <= memory <=65536. Payload and memory are multiples of16;
+entry is even, with at least one complete 2-byte instruction inside code.
+The executable entry is a startup stub which calls `int app_main(void)`;
+application startup exits with its return status (0..255).
 The application uses a process-owned inherited 4096-byte stack, not a new
 module stack. All bytes from payload end to memory end are zeroed on each exec.
 The entire input is staged and validated before copying or publishing READY.
@@ -24,7 +26,7 @@ Generation-bearing inherited PIDs and compiled workers remain independent.
 
 32-byte header: magic `RVDLL01\0`, u32 version=1 at8, exact image bytes at12,
 exports offset at16, export count at20, code offset at24, ABI version=1 at28.
-Maximum file/image size4096, exports1..8. Table offset >=32, multiple of8;
+Even file/image size <=4096, exports1..8. Table offset >=32, multiple of8;
 whole 24-byte-per-export table ends <= code offset; code offset is even and
 strictly below exact image bytes. No trailing data is permitted outside the
 reported image. Export: 16-byte name, u32 image-relative function offset,

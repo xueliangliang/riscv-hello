@@ -223,6 +223,7 @@ static void execute(char *line)
         result("exec", 0, syscall2(SYS_EXEC, (unsigned long)name, 0));
     } else if (equal(line, "help")) {
         say("help echo ps/jobs run spin|sleep|exit [arg] kill pid wait pid sleep ticks stats shutdown\n");
+        say("exec NAME or ./NAME loads an ordinary-file RVEXEC1 application\n");
         say("ls fwrite NAME TEXT cat/fread NAME rm NAME fsinfo fappend NAME TEXT\n");
         say("fseek NAME OFFSET [TEXT] ftruncate NAME SIZE defrag\n");
         say("fstest [create|delete|recreate] fsverify fspressure fsnodes (fresh test disks only)\n");

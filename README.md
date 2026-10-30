@@ -127,3 +127,16 @@ The ignored `state/lesson12/disk.img` is copied once and survives builds/clean.
 **`make reset-lesson12` destroys saved lesson12 files.** BPTFS11 images are
 rejected without modification, not automatically migrated. See the lesson's
 [format contract](lessons/12/FORMAT.md) for layout, capacity and error uncertainty.
+
+## Lesson 13: ordinary-file loader and dynamic math.dll
+
+`make run-lesson13` boots the journaled dual-hart shell. `./math_test` loads a
+validated custom executable from the filesystem; the application resolves and
+calls four soft-float-ABI PIC math exports from the actual `math.dll` file.
+See [lesson13 instructions and verification](lessons/13/README.md) and the
+[byte-format contracts](lessons/13/FORMAT.md). `make test-lesson13`,
+`make test-lesson13-gdb`, and `make test-lesson13-evidence` exercise cold boots,
+both receiving harts, typed pointers, unload/reload, alternate-file rebinding
+and stale-evidence attacks. This is not ELF/PE loading or process isolation.
+The new `state/lesson13/disk.img` is copy-once; only explicit `reset-lesson13`
+destroys it. Earlier lesson sources and bootloader remain unchanged.
