@@ -646,19 +646,19 @@ build/lesson13/user.elf: build/lesson13/user-start.o build/lesson13/user.o build
 build/lesson13/user-symbols.h: build/lesson13/user.elf lessons/13/symbols.py
 	$(PYTHON) lessons/13/symbols.py $(CROSS_COMPILE)nm $< $@
 build/lesson13/kernel.o: build/lesson13/user-symbols.h
-build/lesson13/kernel.elf: $(LOADER_COMMON) build/lesson13/block.o build/lesson13/kernel.o lessons/13/kernel.ld
+build/lesson13/kernel.elf: $(LOADER_COMMON) build/lesson13/block.o build/lesson13/kernel.o build/lesson13/formats.o build/lesson13/snapshot.o lessons/13/kernel.ld
 	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/kernel.ld -o $@ $(filter %.o,$^)
 build/lesson13/block-no-flush.o: lessons/13/block.c lessons/13/block.h | build/lesson13
 	$(CC) $(LOADER_FLAGS) -DNO_FLUSH -c -o $@ $<
-build/lesson13/kernel-no-flush.elf: $(LOADER_COMMON) build/lesson13/block-no-flush.o build/lesson13/kernel.o lessons/13/kernel.ld
+build/lesson13/kernel-no-flush.elf: $(LOADER_COMMON) build/lesson13/block-no-flush.o build/lesson13/kernel.o build/lesson13/formats.o build/lesson13/snapshot.o lessons/13/kernel.ld
 	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/kernel.ld -o $@ $(filter %.o,$^)
 build/lesson13/bootloader.elf: build/lesson13/boot.o build/lesson02/uart.o build/lesson03/bootloader.o build/lesson03/virtio_blk.o lessons/02/linker.ld
 	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/02/linker.ld -o $@ $(filter %.o,$^)
 build/lesson13/%.bin: build/lesson13/%.elf
 	$(OBJCOPY) -O binary $< $@
 	test "$$(stat -c %s $@)" -le 65536
-build/lesson13/disk.img: build/lesson13/kernel.bin build/lesson13/user.bin tools/make-disk-image.py lessons/13/format.py
-	$(PYTHON) lessons/13/format.py build/lesson13/kernel.bin build/lesson13/user.bin $@
+build/lesson13/disk.img: build/lesson13/kernel.bin build/lesson13/user.bin build/lesson13/math_test.exec build/lesson13/math.dll lessons/13/seed.py lessons/13/native.py tools/make-disk-image.py lessons/13/format.py
+	$(PYTHON) lessons/13/seed.py build/lesson13/kernel.bin build/lesson13/user.bin $@
 build/lesson13/disk-no-flush.img: build/lesson13/kernel-no-flush.bin build/lesson13/user.bin tools/make-disk-image.py lessons/13/format.py
 	$(PYTHON) lessons/13/format.py build/lesson13/kernel-no-flush.bin build/lesson13/user.bin $@
 .PHONY: lesson13 run-lesson13 reset-lesson13 test-lesson13 inspect-lesson13
@@ -676,3 +676,26 @@ inspect-lesson13: build/lesson13/bootloader.elf build/lesson13/kernel.elf build/
 	$(READELF) -h -lW $^
 	$(OBJDUMP) -d $^
 inspect: inspect-lesson13
+
+# Pure PIC module and fixed-address ordinary-file application are NOT linked
+# into the kernel/shell. They enter runtime exclusively via filesystem reads.
+DLL_FLAGS := $(filter-out -fno-pic,$(LOADER_FLAGS)) -fPIC -fvisibility=hidden
+build/lesson13/math_dll.o: lessons/13/math_dll.c | build/lesson13
+	$(CC) $(DLL_FLAGS) -c -o $@ $<
+build/lesson13/math_alt.o: lessons/13/math_dll.c | build/lesson13
+	$(CC) $(DLL_FLAGS) -DALTERNATE -c -o $@ $<
+build/lesson13/math.elf: build/lesson13/math_dll.o lessons/13/module.ld
+	$(CC) $(DLL_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/module.ld -o $@ $<
+build/lesson13/math-alt.elf: build/lesson13/math_alt.o lessons/13/module.ld
+	$(CC) $(DLL_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/module.ld -o $@ $<
+build/lesson13/math.dll: build/lesson13/math.elf lessons/13/pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson13/math.text
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/13/pack.py module $< build/lesson13/math.text $@
+build/lesson13/math-alt.dll: build/lesson13/math-alt.elf lessons/13/pack.py
+	$(OBJCOPY) -O binary --only-section=.text $< build/lesson13/math-alt.text
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/13/pack.py module $< build/lesson13/math-alt.text $@
+build/lesson13/math_test.elf: build/lesson13/app-start.o build/lesson13/math_test.o build/lesson13/module_loader.o build/lesson13/formats.o build/lesson13/syscall.o lessons/13/app.ld
+	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/app.ld -o $@ $(filter %.o,$^)
+build/lesson13/math_test.exec: build/lesson13/math_test.elf lessons/13/pack.py
+	$(OBJCOPY) -O binary $< build/lesson13/math_test.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/13/pack.py executable $< build/lesson13/math_test.raw $@

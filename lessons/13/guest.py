@@ -87,6 +87,3 @@ class Guest:
         self.process.wait(timeout=2)
         os.close(self.master)
         self.path.write_bytes(self.all)
-
-
-
