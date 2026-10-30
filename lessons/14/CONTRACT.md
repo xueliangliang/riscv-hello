@@ -13,7 +13,10 @@ prefix at most 48 bytes including NUL; the vector and every complete string must
 belong to the caller's admitted region. All strings are copied before app memory
 is overwritten. ABI1 rejects nonzero argc. ABI2 enters with a0=argc, a1=argv,
 argv points into that process's 256-byte data slot; strings follow the 40-byte
-vector. Those bytes belong to the process until reap. No EXEC until previous
+vector. Those bytes belong to the process until reap. The copied vector and strings occupy
+the leading bytes of that 256-byte per-slot region, so they replace the worker
+`counter`/`canary` values there; no ABI2 code depends on those fields, and ABI1
+calls keep the original values. No EXEC until previous
 file application is reaped, even after exit/kill. No recursive compiler EXEC.
 
 ABI2 uses the exclusive 64 KiB stack [0x80410000,0x80420000); ABI1/workers keep

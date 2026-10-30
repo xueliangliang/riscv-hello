@@ -4,6 +4,9 @@
 static char history[HISTORY][LINE];
 static int history_count;
 static int previous_cr;
+/* Deliberately never assigned: the baseline is the boot-time zero counter, so a
+ * paste cannot hide drops that happened before its own command was parsed.
+ * Do not re-sample this per command. */
 static unsigned long command_drop_baseline;
 static unsigned char paste[8192 + 33] __attribute__((section(".paste")));
 
