@@ -9,15 +9,18 @@ The ELF files are host inspection/link intermediates only.
 48-byte header: magic `RVEXEC1\0` (8 bytes), then ten u32 fields at offsets
 8 version=1, 12 exact file bytes, 16 payload bytes, 20 entry offset relative
 to payload, 24 load address=0x80500000, 28 memory bytes (payload+BSS),
-32 ABI=1, 36 code bytes, 40 reserved=0, 44 reserved=0.
+32 ABI=1 or 2, 36 code bytes, 40 reserved=0, 44 reserved=0.
 Payload immediately follows. File bytes must equal 48+payload, with no trailing
 bytes, and the whole file must fit65536 bytes. Code bytes are even and at least2;
-code <= payload <= memory <=65536. Payload and memory are multiples of16;
+code <= payload <= memory; memory <=65536 for ABI1, <=1048576 for ABI2.
+File bytes remain <=65536 in BOTH ABIs. Payload and memory are multiples of16;
 entry is even, with at least one complete 2-byte instruction inside code.
-The executable entry is a startup stub which calls `int app_main(void)`;
-application startup exits with its return status (0..255).
-The application uses a process-owned inherited 4096-byte stack, not a new
-module stack. All bytes from payload end to memory end are zeroed on each exec.
+ABI1's executable entry is a startup stub calling `int app_main(void)` with an
+inherited process-owned 4096-byte stack. ABI2 enters with a0=argc/a1=argv and
+the private 65536-byte stack. See CONTRACT.md for ownership, copying and bounds.
+Compiler entry calls cc_main(argc,argv); generated entry is native emitted code,
+not a call into the compiler. EXIT status is bounded 0..255.
+All bytes from payload end to memory end are zeroed on each exec.
 The entire input is staged and validated before copying or publishing READY.
 One file application owns the fixed region until WAIT reaps it, including ZOMBIE.
 Generation-bearing inherited PIDs and compiled workers remain independent.
@@ -52,13 +55,15 @@ the non-NaN operand if one is NaN, the second if both are NaN. At zero ties max
 returns +0 and min -0. No ISO libm/fenv/exception/NaN-quieting claims.
 
 READFILE(31,name,buffer,capacity) is an exact existing-only read-only snapshot
-for the designated file application. EXEC(30,name,0,0) is shell-only. Old file
+for the designated file application. EXEC(30,name,argc,argv) is shell-only,
+with zero/zero preserving legacy ABI1 behavior. Old file
 handles stay shell-only. Caller ownership is checked before pointer access;
 filename including NUL must be a contiguous admitted prefix, at most31 bytes.
 Capacity1..65536, full destination interval admitted, no partial copy on error.
 Kernel closes its private FS handle even after I/O/capacity failure. Filesystem
-and scheduler serialization make the snapshot stable; no guest write API is
-added for applications.
+and scheduler serialization make the snapshot stable. STORE32 is a new bounded
+whole-file publication API for the designated application, not arbitrary handles.
+APPEND33 is shell-only; both use one outer transaction. See CONTRACT.md.
 
 The U loader has one active module and two alternating aligned4096-byte BSS
 banks, plus staging. A second load while active rejects without changing it.
@@ -74,3 +79,19 @@ Flat PMP permits U access to RAM: admission checks are not process isolation.
 Boot still uses lesson03's disk loader for kernel and shell. BPTFS12 geometry,
 1024-sector redo journal and four-FLUSH ordering are unchanged; no autoformat,
 migration or boot reseed. Only newly generated lesson14 fixtures are seeded.
+
+## Integer runtime prefix (not the DLL ABI)
+
+Generated ABI2 payload begins with the trusted integer-runtime prefix embedded
+in cc. `integer-runtime.S` is assembled/linked without relocations or unresolved
+symbols. Its 32-byte header is `RVINT14\0`, u32 version1, exact prefix length,
+print_int offset, and three zero reserved fields. The producer validates these
+and emits a C constant; cc validates version/length/entry/magic before use.
+The generated entry starts after that exact prefix. Native `jal` calls the
+integer helper, which accepts signed64 in a0, prints its full decimal value plus
+LF using SYS_WRITE, returns zero and preserves callee-saved registers. No source
+interpretation, F/D instruction, import table or compiler-process dependency.
+String data begins at payload offset32768; payload includes zero padding and
+is aligned to16. Code bytes end at the actual emitted instruction boundary,
+not at the string-data base. Native branches use fixed 32-bit RV64 encodings;
+long conditional control flow uses an inverted short skip plus patched JAL.

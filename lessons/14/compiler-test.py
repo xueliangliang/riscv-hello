@@ -43,7 +43,7 @@ def native_header(data):
     assert 32 <= entry < code <= 32768 and not code % 4 and not (a or b)
     assert struct.unpack_from('<I', data, 48+entry)[0] == 0x80010113, 'native stack prologue'
     assert data[48:56] == b'RVINT14\0'
-    assert b'int main' not in data
+
     return {'bytes': len(data), 'entry': entry, 'code': code,
             'sha256': hashlib.sha256(data).hexdigest()}
 
@@ -90,7 +90,7 @@ def programs():
     cases = []
     cases.append(('loop', 'int main(void) { int n=8; int sum=0; while(n>0) { sum=sum+n*n; n=n-1; } if(sum==204) print_int(sum*1234567); else print_int(-9); return 23; }\n', [str(sum(n*n for n in range(1,9))*1234567)], 23))
     cases.append(('scope', '/* unrelated spelling */ int main() {int a=7; {int a=19; print_int(a);} print_int(a); print_int(2+3*4); print_int((2+3)*4); if(!0) if(0) print_int(1); else print_int(8); return 0;}\n', ['19','7','14','20','8'], 0))
-    cases.append(('text', 'int main() { puts("quote: \\\" slash: \\\\ tab:\\t utf8: 中文"); puts(""); return 9; }\n', ['quote: " slash: \\ tab:\t utf8: 中文', ''], 9))
+    cases.append(('text', 'int main() { puts("quote: \\\" slash: \\\\ tab:\\t utf8: 中文"); puts("int main"); puts(""); return 9; }\n', ['quote: " slash: \\ tab:\t utf8: 中文', 'int main', ''], 9))
     arithmetic = [(-9223372036854775807, 13), (-77, 9), (77, -9), (-77, -9), (1234567890123456789, 12345), (9,0), (-9223372036854775807-1,-1)]
     for index, (left,right) in enumerate(arithmetic):
         literal = '-9223372036854775807-1' if left == -(1<<63) else str(left)
@@ -183,7 +183,18 @@ def main():
                     assert 'never' not in snapshot(disk)['files']
                     assert content(disk,name) == before_source
                     failures.append(record)
+            paste(guest,'oversize.c',b' '*8191+b'\n')
+            guest.cmd('fappend oversize.c x','fappend target=0 result=1')
+            oversized_source=content(disk,'oversize.c')
+            assert len(oversized_source)==8193
+            for output in ('loop','never'):
+                run(guest,f'./cc oversize.c {output}',3)
+                check_saved(content(disk,'oversize.c'),oversized_source)
+                check_saved(content(disk,'loop'),old)
+                assert 'never' not in snapshot(disk)['files']
             run(guest,'./cc',2)
+            run(guest,'./cc absent.c never',3)
+            assert 'never' not in snapshot(disk)['files']
             run(guest,'./cc absent.c loop',3)
             assert content(disk,'loop') == old
             run(guest,'./cc loop.c loop.c',2)

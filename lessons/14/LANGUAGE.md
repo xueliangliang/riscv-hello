@@ -26,10 +26,11 @@ INT64_MIN / -1 yields INT64_MIN and remainder zero. Decimal literals may range
 Return defaults to zero; EXIT status is the low eight bits. Tests must check
 printed full-width integer results independently of the exit status.
 
-Bounds: source 8192 bytes, identifier 31 bytes, string 1024 decoded bytes,
+Bounds: source 8192 bytes, 8192 tokens, identifier 31 bytes, string 1024 decoded bytes,
 256 simultaneously visible symbols, 256 total local slots, 4096 AST nodes,
 64 expression/parser recursion levels, 32 block nesting levels, 32768 bytes
-code and 8192 bytes string data, native evaluation depth 128 values. Native
+code and 8192 bytes string data, code-generation recursion 128 levels and native
+evaluation depth 128 values. Native
 locals use a fixed 2048-byte frame; expression temporaries are 16-byte aligned.
 Generated images use ABI2. Compiler static workspaces are not a larger heap.
 Errors include line numbers; no output publication occurs before the complete

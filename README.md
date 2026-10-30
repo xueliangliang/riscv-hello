@@ -140,3 +140,23 @@ both receiving harts, typed pointers, unload/reload, alternate-file rebinding
 and stale-evidence attacks. This is not ELF/PE loading or process isolation.
 The new `state/lesson13/disk.img` is copy-once; only explicit `reset-lesson13`
 destroys it. Earlier lesson sources and bootloader remain unchanged.
+
+
+## Lesson 14: guest-running integer C-subset compiler
+
+[Lesson14](lessons/14/README.md) closes raw UART source paste → actual guest
+source file → separate U-mode `cc` → genuine RV64 executable file → compiler
+exit/wait/reap → independent native execution → cold reboot/run without cc.
+This is host-built/guest-running, not self-hosting or full ISO C. The bounded
+integer language and ABI2 argument/memory contract are explicit; inherited
+ABI1 math_test/DLL behavior remains available, but floating/compiler dynamic
+math runtime integration is later scope. Whole-file output publication is one
+journal transaction; deterministic failures preserve old bytes or absence.
+
+Run `make run-lesson14`, `make test-lesson14`, `make inspect-lesson14`,
+`make test-lesson14-gdb` and `make test-lesson14-evidence`. Saved lesson14 disks
+are copy-once and survive clean/rebuild. **`make reset-lesson14` destroys saved
+lesson14 files.** `LESSON14_ARGS='--disk ...'` selects run/reset targets under
+the same competing-process lock. Earlier lessons, tools and published tags
+remain unchanged. No board/cache/power-cut certification or process isolation
+is implied by QEMU functional tests.

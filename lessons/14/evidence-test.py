@@ -9,6 +9,7 @@ import time
 from debugger import DebuggerSession
 from gate import stage
 BUILD=Path('build/lesson14')
+BUILD.mkdir(parents=True,exist_ok=True)
 EVIDENCE=Path(os.environ.get('TMPDIR','build/lesson14'))/'lesson14-evidence'
 EVIDENCE.mkdir(parents=True,exist_ok=True)
 

@@ -40,4 +40,6 @@ Ctrl-C/D), overflow and any observed RX losses reject without opening file and
 drain until exact delimiter; even cancellation REQUIRES delimiter for resync.
 Delimiter lookahead is separate from the body bound. RX ring is 16384 bytes,
 not flow control; supported burst must include command and delimiter framing.
-Loss baseline is sampled before command input and compared after raw collection.
+Loss baseline is boot's zero counter, predating even already-queued commands;
+any RX loss disables raw publication until reboot. Drain/editor recovery still
+works, but a later paste cannot silently acknowledge hidden earlier losses.
