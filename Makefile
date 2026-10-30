@@ -824,7 +824,7 @@ SOFT_SOURCES := adddf3 subdf3 muldf3 divdf3 comparedf2 negdf2 fixdfdi fixunsdfdi
 SOFT_OBJECTS := $(addprefix build/lesson15/soft-,$(addsuffix .o,$(SOFT_SOURCES)))
 
 # Lesson15: bounded full-data redo journal over the B+ tree filesystem.
-SOFT_COMPILER_FLAGS := $(LESSON02_CFLAGS) -O1 -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/15 -Ibuild/lesson15
+SOFT_COMPILER_FLAGS := $(LESSON02_CFLAGS) -O1 -fstack-usage -fno-unwind-tables -fno-asynchronous-unwind-tables -Ilessons/02 -Ilessons/15 -Ibuild/lesson15
 SOFT_COMPILER_COMMON := build/lesson15/start.o build/lesson15/runtime.o build/lesson15/trap.o build/lesson15/fs.o build/lesson15/journal.o build/lesson02/uart.o
 build/lesson15:
 	mkdir -p $@
@@ -863,7 +863,7 @@ reset-lesson15: lesson15
 test-lesson15:
 	QEMU="$(QEMU)" CC="$(CC)" $(PYTHON) lessons/15/gate.py
 test: test-lesson15
-inspect-lesson15: build/lesson15/bootloader.elf build/lesson15/kernel.elf build/lesson15/user.elf build/lesson15/math_test.elf build/lesson15/math.elf build/lesson15/cc.elf
+inspect-lesson15: build/lesson15/bootloader.elf build/lesson15/kernel.elf build/lesson15/user.elf build/lesson15/math_test.elf build/lesson15/math.elf build/lesson15/cc.elf build/lesson15/runtime15.elf
 	$(READELF) -h -lW $(filter %.elf,$^)
 	$(OBJDUMP) -d $(filter %.elf,$^)
 inspect: inspect-lesson15
@@ -899,6 +899,8 @@ test-lesson15-gdb:
 	+$(MAKE) --no-print-directory lesson15
 	QEMU="$(QEMU)" $(PYTHON) lessons/15/gdb-test.py
 test-lesson15-evidence:
+	@mkdir -p build/lesson15
+	$(PYTHON) lessons/15/fresh-log.py build/lesson15/evidence-results.json
 	$(PYTHON) lessons/15/evidence-test.py
 
 build/lesson15/io_test.elf: build/lesson15/app-start.o build/lesson15/io_test.o build/lesson15/module_loader.o build/lesson15/formats.o build/lesson15/syscall.o lessons/15/app.ld

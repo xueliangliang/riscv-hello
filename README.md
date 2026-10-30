@@ -160,3 +160,21 @@ lesson14 files.** `LESSON14_ARGS='--disk ...'` selects run/reset targets under
 the same competing-process lock. Earlier lessons, tools and published tags
 remain unchanged. No board/cache/power-cut certification or process isolation
 is implied by QEMU functional tests.
+
+
+## Lesson 15: software binary64 compiler and versioned dynamic runtime
+
+[Lesson15](lessons/15/README.md) extends the real guest compiler with typed
+int64/double native emission, pinned licensed LP64 software floating helpers,
+an ordinary-file versioned runtime template and actual lazy math.dll calls.
+Generated RVEXEC1 ABI3 is distinct from retained ABI1/ABI2; no F/D registers or
+instructions are required. Raw source → cc exit/reap → saved native EXEC → cold
+WHOLE source/executable read-first execution and unchanged-executable DLL
+rebinding are exercised, not interpreted or source-recognized. This is not
+self-hosting, ISO C/libc, process isolation or physical power-cut certification.
+
+Use `make run-lesson15`, `make test-lesson15`, `make inspect-lesson15`,
+`make test-lesson15-gdb` and `make test-lesson15-evidence`. The copy-once disk
+`state/lesson15/disk.img` survives build/clean/reboot. **`make reset-lesson15`
+destroys selected lesson15 files.** `LESSON15_ARGS='--disk ...'` selects the
+run/reset disk under one lock. Lessons01–14/tools remain unchanged.

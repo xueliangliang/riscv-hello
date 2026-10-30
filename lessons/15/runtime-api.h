@@ -1,5 +1,11 @@
 #ifndef RUNTIME15_API_H
 #define RUNTIME15_API_H
+/* Signature IDs (lp64 integer-register calling convention):
+ * 1 void(void); 2 int64(int64); 3 int64(double);
+ * 4 int64(const char *, uint64 length); 5 double(int64);
+ * 6 int64(double) numeric conversion/truth (distinct semantic contract);
+ * 7 double(double); 8 double(double,double); 9 int64(double,double).
+ * IDs identify API contracts, not dynamic C type introspection. */
 #define RT_PREFIX 20480U
 #define RT_CODE_LIMIT 32768U
 #define RT_STRINGS (RT_PREFIX + RT_CODE_LIMIT)

@@ -173,6 +173,14 @@ static void lex(void)
             continue;
         }
         if (position < source_size && source[position] == '#') {
+            /* Token rejection precedes directive recognition: ## must not
+             * become a malformed include merely because it starts with #. */
+            reject_unsupported_operator(position);
+            for (unsigned previous = position; previous && source[previous - 1] != '\n'; previous--) {
+                if (source[previous - 1] != ' ' && source[previous - 1] != '\t') {
+                    error("directive must begin a source line");
+                }
+            }
             unsigned start = position;
             while (position < source_size && source[position] != '\n') {
                 position++;

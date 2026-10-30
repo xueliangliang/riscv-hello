@@ -10,8 +10,7 @@ from debugger import DebuggerSession
 from gate import stage
 BUILD=Path('build/lesson15')
 BUILD.mkdir(parents=True,exist_ok=True)
-EVIDENCE=Path(os.environ.get('TMPDIR','build/lesson15'))/'lesson15-evidence'
-EVIDENCE.mkdir(parents=True,exist_ok=True)
+EVIDENCE=Path(tempfile.mkdtemp(prefix='lesson15-evidence-',dir=os.environ.get('TMPDIR')))
 
 with tempfile.TemporaryDirectory(prefix='lesson15-evidence-',dir=os.environ.get('TMPDIR')) as temp:
     directory=Path(temp)
@@ -78,7 +77,11 @@ def run(name,target,env=None,success=True):
 run('wrong-cc','test-lesson15',{'CC':'/bin/false'},False)
 assert not (BUILD/'results.json').exists()
 assert (BUILD/'gdb-loader.log').read_bytes()==b''
-assert b'/bin/false' in (BUILD/'gate-build.log').read_bytes()
+assert b'/bin/false' in (BUILD/'gate-toolchain.log').read_bytes()
+(BUILD/'results.json').write_text('{"status":"PASS"}')
+run('no-output-cc','test-lesson15',{'CC':'/bin/true'},False)
+assert not (BUILD/'results.json').exists()
+assert (BUILD/'gdb-loader.log').read_bytes()==b''
 (BUILD/'gdb-loader.log').write_bytes(b'STALE PASS GDB\n')
 run('early-setup','test-lesson15-gdb',{'GDB':'/no/such/lesson15-debugger'},False)
 assert b'STALE' not in (BUILD/'gdb-loader.log').read_bytes()
@@ -91,4 +94,5 @@ run('restored-runtime','test-lesson15')
 run('restored-real-gdb','test-lesson15-gdb')
 assert b'PASS GDB:' in (BUILD/'gdb-loader.log').read_bytes()
 (BUILD/'evidence-results.json').write_text('{"status":"PASS","wrong_CC":true,"early_setup":true,"fake_GDB":true,"partial_timeout_and_reap":true,"restored_real_GDB":true}\n')
+print('Evidence directory:', EVIDENCE)
 print('PASS evidence attacks: real timeout/nonzero/early children reaped, build/setup stale PASS removed, fake GDB rejected, real gates restored')

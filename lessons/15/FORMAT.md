@@ -9,14 +9,14 @@ The ELF files are host inspection/link intermediates only.
 48-byte header: magic `RVEXEC1\0` (8 bytes), then ten u32 fields at offsets
 8 version=1, 12 exact file bytes, 16 payload bytes, 20 entry offset relative
 to payload, 24 load address=0x80500000, 28 memory bytes (payload+BSS),
-32 ABI=1 or 2, 36 code bytes, 40 reserved=0, 44 reserved=0.
+32 ABI=1, 2 or 3, 36 code bytes, 40 reserved=0, 44 reserved=0.
 Payload immediately follows. File bytes must equal 48+payload, with no trailing
 bytes, and the whole file must fit 65536 bytes. Code bytes are even and at least 2;
-code <= payload <= memory; memory <=65536 for ABI1, <=1048576 for ABI2.
-File bytes remain <=65536 in BOTH ABIs. Payload and memory are multiples of 16;
+code <= payload <= memory; memory <=65536 for ABI1, <=1048576 for ABI2/3.
+File bytes remain <=65536 in ALL ABIs. Payload and memory are multiples of 16;
 entry is even, with at least one complete 2-byte instruction inside code.
 ABI1's executable entry is a startup stub calling `int app_main(void)` with an
-inherited process-owned 4096-byte stack. ABI2 enters with a0=argc/a1=argv and
+inherited process-owned 4096-byte stack. ABI2/3 enter with a0=argc/a1=argv and
 the private 65536-byte stack. See CONTRACT.md for ownership, copying and bounds.
 Compiler entry calls cc_main(argc,argv); generated entry is native emitted code,
 not a call into the compiler. EXIT status is bounded 0..255.
@@ -80,18 +80,25 @@ Boot still uses lesson03's disk loader for kernel and shell. BPTFS12 geometry,
 1024-sector redo journal and four-FLUSH ordering are unchanged; no autoformat,
 migration or boot reseed. Only newly generated lesson15 fixtures are seeded.
 
-## Integer runtime prefix (not the DLL ABI)
+## Versioned runtime15 prefix (ABI3 only)
 
-Generated ABI2 payload begins with the trusted integer-runtime prefix embedded
-in cc. `integer-runtime.S` is assembled/linked without relocations or unresolved
-symbols. Its 32-byte header is `RVINT14\0`, u32 version 1, exact prefix length,
-print_int offset, and three zero reserved fields. The producer validates these
-and emits a C constant; cc validates version/length/entry/magic before use.
-The generated entry starts after that exact prefix. Native `jal` calls the
-integer helper, which accepts signed 64-bit in a0, prints its full decimal value plus
-LF using SYS_WRITE, returns zero and preserves callee-saved registers. No source
-interpretation, F/D instruction, import table or compiler-process dependency.
-String data begins at payload offset 32768; payload includes zero padding and
-is aligned to 16. Code bytes end at the actual emitted instruction boundary,
-not at the string-data base. Native branches use fixed 32-bit RV64 encodings;
-long conditional control flow uses an inverted short skip plus patched JAL.
+See [RUNTIME.md](RUNTIME.md) and the exact ordered [API IDs](runtime-api.h).
+A runtime-requiring executable MUST use ABI3. ABI2 remains accepted for the
+unchanged integer14 executable and for the host-built compiler itself; it is
+never mistaken for a runtime15 image. ABI1 math_test and RVDLL01 ABI1 remain.
+
+The ordinary file `c_runtime` is exactly20480 bytes and is read by guest cc,
+not synthesized by EXEC or silently repaired. Its header/table/function region,
+BSS bounds and version are checked by the same C validator in compiler and
+kernel, independently checked by the packer, and guarded in the U runtime.
+Generated code occupies payload offsets20480..53248, strings begin53248.
+Code length is its ACTUAL end, not padding; entry is20480 and points to emitted
+runtime guard + native prologue. Reserved executable header words remain zero.
+Native calls use integer argument registers and16-byte-aligned temporaries.
+
+Runtime BSS begins at payload offset65536, beyond ALL on-disk payload bytes,
+including padding/strings. Kernel zeroes it on every execution. Linker ASSERTs
+and resource-test.py check actual endpoints and all static workspaces/stacks.
+There is no heap-growth claim. API table validation is structural, not a code
+signature or sandbox: deliberately semantically wrong but well-formed tables
+are used to prove the independent full-bit oracle detects bad dispatch.

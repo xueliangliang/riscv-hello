@@ -1,4 +1,4 @@
-# Language15 frozen subset (implementation acceptance pending)
+# Language15 frozen subset
 
 Retain lesson14 bounded int64 main, locals, scoped blocks, if/else, while,
 assignment, unary + - !, arithmetic and six comparisons, puts and print_int.

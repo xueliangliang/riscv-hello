@@ -19,6 +19,7 @@ def check_gdb_output(output):
     assert all(int(size)==compiler_size for name,hart,pc,size in entries if name==b'cc')
     assert all(pc==b'0x80500000' for name,hart,pc,size in entries if name==b'cc')
     assert all(int(size)>=32768 and pc==b'0x80505000' for name,hart,pc,size in entries if name==b'native')
+    assert output.count(b'ADMISSION REJECT entire_1MiB_unchanged states_unchanged') == 6
     assert re.findall(rb'ACTUAL DLL EXPORT hart=([01]) argument=0x400a000000000000', output) == [b'1', b'0']
     assert re.findall(rb'RUNTIME MODULE FENCE hart=([01])', output) == [b'1', b'0']
     assert b'PASS GDB: actual compiler and emitted program U entries' in output
@@ -30,6 +31,20 @@ def main():
             directory=Path(temporary)
             disk=directory/'disk.img'
             shutil.copyfile('build/lesson15/disk.img',disk)
+            import struct
+            from native import Native
+            from vectors import u32
+            runtime=Path('build/lesson15/c_runtime').read_bytes()
+            payload=53248
+            fixture=struct.pack('<8s10I',b'RVEXEC1\0',1,48+payload,payload,20480,
+                                0x80500000,int.from_bytes(runtime[36:40],'little'),3,20484,0,0)
+            fixture+=runtime+bytes(payload-len(runtime))
+            malformed=[u32(fixture,32,4),u32(fixture,20,256),u32(fixture,44,1),
+                       u32(fixture,48+8,2),u32(fixture,48+68,2),u32(fixture,48+64,20480)]
+            fs=Native(disk)
+            for index,image in enumerate(malformed):
+                fs.put('bad'+str(index),image)
+            fs.save(disk)
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1',0))
                 port=sock.getsockname()[1]
@@ -51,6 +66,9 @@ receivers=[]
 entries=[]
 exports=[]
 module_fences=[]
+rejections=[]
+admission_bytes=None
+admission_states=None
 installed=set()
 pending=None
 failure=None
@@ -93,6 +111,15 @@ class NativeEntry(gdb.Breakpoint):
                 assert memory(pointers[0],3)==b'cc\\0'
                 assert memory(pointers[1],6)==b'gdb.c\\0'
                 assert memory(pointers[2],7)==b'native\\0'
+            else:
+                assert integer('$a0')==1
+                argv=integer('$a1')
+                assert 0x80407000 <= argv < 0x80407800
+                pointers=struct.unpack('<2Q',memory(argv,16))
+                assert pointers[1]==0 and memory(pointers[0],7)==b'native\\0'
+                memory_size=int.from_bytes(image[28:32],'little')
+                payload_size=len(image)-48
+                assert memory(0x80500000+payload_size,memory_size-payload_size)==bytes(memory_size-payload_size)
             print('U NATIVE ENTRY name=%s hart=%d pc=%#x priv=0 exact_payload=%d'%(name,hart,pc,len(image)-48))
             print(gdb.execute('x/8i $pc',to_string=True))
             entries.append((name,hart))
@@ -122,6 +149,31 @@ class Received(gdb.Breakpoint):
         except Exception as error:
             failure=error
             return True
+class Admission(gdb.Breakpoint):
+    def stop(self):
+        global admission_bytes,admission_states,failure
+        try:
+            admission_bytes=memory(0x80500000,1048576)
+            admission_states=[integer('processes[%d].state'%slot) for slot in range(8)]
+            return False
+        except Exception as error:
+            failure=error
+            return True
+class Rejected(gdb.Breakpoint):
+    def stop(self):
+        global failure
+        try:
+            assert integer('file_slot') == -1
+            assert memory(0x80500000,1048576)==admission_bytes
+            assert [integer('processes[%d].state'%slot) for slot in range(8)]==admission_states
+            rejections.append(1)
+            print('ADMISSION REJECT entire_1MiB_unchanged states_unchanged')
+            return False
+        except Exception as error:
+            failure=error
+            return True
+Admission('application_admission_begin',internal=True)
+Rejected('application_rejected',internal=True)
 class ModuleFence(gdb.Breakpoint):
     def stop(self):
         global failure
@@ -179,6 +231,7 @@ assert entries==[('cc',1),('native',1),('cc',0),('native',0)],entries
 assert receivers==entries
 assert fences==[1,1,0,0]
 assert exports==[1,0] and module_fences==[1,0]
+assert len(rejections)==6
 print('PASS GDB: actual compiler and emitted program U entries, exact persisted payload, argv and both receiving-hart fences')
 end
 detach
@@ -188,6 +241,8 @@ quit
             try:
                 session.start([os.environ.get('GDB','gdb-multiarch'),'-q','-batch','-x',str(script)])
                 guest.until('15> ',10)
+                for index in range(6):
+                    guest.cmd('./bad'+str(index),'exec target=0 result=-4')
                 guest.send('fappend gdb.c <<EOF\r\nint main(){int a=9; while(a>3){a=a-1;} print_int(a*11111); print_bits(ceil(3.25)); return 26;}\r\nEOF\r\n')
                 guest.until('raw target=0 result=')
                 guest.read()

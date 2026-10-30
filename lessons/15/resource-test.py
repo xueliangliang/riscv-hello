@@ -47,7 +47,19 @@ maximum=max(stack_usage.values())
 # coexist, but counting all their depth caps still fits the private stack.
 conservative_stack=(64+64+128)*maximum+4096
 assert conservative_stack<65536
-assert 2048+128*16+48<65536
+runtime_stack_usage={}
+runtime_objects=['runtime15','formats','module_loader','syscall']
+manifest=json.loads(Path('lessons/15/softfloat/UPSTREAM.json').read_text())
+runtime_objects += ['soft-'+entry['name'][:-2] for entry in manifest['files'] if entry['name'].endswith('.c')]
+for object_name in runtime_objects:
+    for line in (BUILD/(object_name+'.su')).read_text().splitlines():
+        function,size,kind=line.split('\t')
+        assert kind=='static', 'unbounded runtime stack'
+        runtime_stack_usage[object_name+':'+function.rsplit(':',1)[1]]=int(size)
+# Runtime/helper call graph has no recursion: summing EVERY static frame is
+# pessimistic but includes the full module/softfloat/console dispatch closure.
+generated_stack_bound=2048+128*16+48+sum(runtime_stack_usage.values())
+assert generated_stack_bound<65536
 files={name:(BUILD/name).stat().st_size for name in ('kernel.bin','user.bin','cc.exec','integer-runtime.raw','math_test.exec','math.dll','c_runtime')}
 for name in ('kernel.bin','user.bin','cc.exec'):
     assert files[name]<=65536
@@ -60,7 +72,14 @@ import re
 for name in ('cc','runtime15','math','kernel'):
     assembly=subprocess.check_output([prefix+'objdump','-d',str(BUILD/(name+'.elf'))],text=True)
     assert not re.search(r'\t(?:f(?:add|sub|mul|div|sqrt|cvt|mv|eq|lt|le|class|sgnj|lw|ld|sw|sd)|fl[wd]|fs[wd])\.',assembly),name
-result={'status':'PASS','file_bytes':files,
+import hashlib
+vendor_hashes={}
+for entry in manifest['files']:
+    raw=(Path('lessons/15/softfloat')/entry['name']).read_bytes()
+    digest=hashlib.sha256(raw).hexdigest()
+    assert digest==entry['sha256']
+    vendor_hashes[entry['name']]=digest
+result={'status':'PASS','file_bytes':files,'vendor_sha256':vendor_hashes,'unresolved_symbols':[],
         'boot_bss':[hex(boot['__bss_start']),hex(boot['__bss_end'])],
         'boot_stack':[hex(boot['__stack_bottom']),hex(boot['__stack_top'])],
         'kernel_bss':[hex(kernel['__bss_start']),hex(kernel['__bss_end'])],
@@ -87,6 +106,7 @@ result={'status':'PASS','file_bytes':files,
         'ABI2_stack':['0x80410000','0x80420000'],
         'compiler_stack_usage':stack_usage,
         'pessimistic_static_stack_bound':conservative_stack,
-        'generated_stack_bound':2048+128*16+48}
+        'runtime_stack_usage':runtime_stack_usage,
+        'generated_stack_bound':generated_stack_bound}
 (BUILD/'resource-results.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result,indent=2))

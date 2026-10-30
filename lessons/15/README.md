@@ -1,182 +1,149 @@
-# 14 — paste C source, compile in U mode, execute saved RV64 code
+# 15 — guest compiler, software binary64 and runtime-linked math
 
-This milestone is **host-built / guest-running**, not compiler self-hosting.
-The separate ordinary-file `cc` application reads the actual guest source,
-lexes/parses/type-checks it, emits native RV64 instructions, then publishes a
-complete custom executable through one filesystem transaction. It exits and
-must be reaped before the independently loaded generated program can execute.
-A fresh QEMU process can run that saved file without recompilation.
+The real closure is raw UART source → ordinary guest file → separate U-mode
+`cc` lexer/typed AST/native RV64 emitter → atomic saved executable → compiler
+exit/WAIT/reap → independent EXEC → actual PIC `math.dll` resolution/call →
+new QEMU cold read of WHOLE source/executable before any writes → execution
+without cc. This is host-built/guest-running, not self-hosting or ISO C.
 
-## Run from the repository root
+## Reader commands
 
-Dependencies: RV64 cross GCC/binutils (`riscv64-linux-gnu-`), host C compiler,
-Python3 standard library, QEMU system emulator and `gdb-multiarch` for debugger
-checks. No downloaded compiler library or Python package is needed.
+Dependencies: cross GCC/binutils `riscv64-linux-gnu-`, host C compiler, Python3
+stdlib, QEMU system/user emulators, `gdb-multiarch` for debugger gates. The
+licensed pinned compiler-rt sources are already vendored: no libgcc/libc link,
+Python packages, network dependency, F/D extension or floating register context.
 
 ```sh
 make lesson15
 make run-lesson15
 ```
 
-Paste this **whole block**, including its standalone end marker:
+At `15>`, paste a whole source body (including standalone end marker):
 
 ```text
-fappend demo.c <<END
+fappend hello.c <<END
+#include <stdio.h>
+#include <math.h>
 int main(void) {
-    int n = 8;
-    int total = 0;
+    int n = 5;
+    int sum = 0;
     while (n > 0) {
-        total = total + n * n;
+        sum = sum + n;
         n = n - 1;
     }
-    puts("native RV64 result:");
-    print_int(total * 1234567);
+    double x = 3.25;
+    printf("sum=%d ceil=%f average=%f\n", sum, ceil(x), sum / 5.0);
+    print_bits(min(ceil(x), max(2.0, 3.5)));
     return 23;
 }
 END
-./cc demo.c demo
+./cc hello.c hello
 ```
 
-The shell prints the actual compiler PID. Use `wait PID` with that exact PID,
-then `./demo` and `wait NEW_PID`. The printed full integer result is 251851668;
-its exit status is 23. Reboot with `shutdown`, then `make run-lesson15`, and run
-`cat demo.c`, `./demo` and `wait PID` **without running cc again**.
-`exec cc demo.c demo` is equivalent. PIDs carry generation and slot, not hart
-number; do not reuse example numbers after other launches.
+Wait the ACTUAL compiler PID printed by the shell (`wait PID`), then execute
+`./hello` and wait its NEW PID. Expected full output is `sum=15 ceil=4.000000
+average=3.000000` on one line, then `0x400c000000000000`; native exit23.
+No filename/source recognition selects that result. `demo.c` contains the full
+original-style demo: sum1..5, double3.25, ceil/floor/max/min/nested math, average,
+and deterministic checks ending `DEMO_PASS`. Paste its actual contents the
+same way; the automated float gate does this over a real PTY/UART.
 
-`fappend` appends, including on an existing file. Remove an old source explicitly
-if replacement is intended. Raw bodies preserve tabs, quotes, backslashes and
-UTF-8; CR/LF/CRLF normalize to LF. The terminator must match the entire line.
-Empty bodies do not create files. Invalid controls, cancellation, overflow or
-RX loss reject the entire body without opening the file, then drain through
-its terminator. **Ctrl-C/D still require the terminator to resynchronize.**
-RX losses are sticky for raw publication until reboot; a later baseline must
-not hide losses from a command that was already queued. Buffering is not flow
-control. See [the contracts](CONTRACT.md) for actual bounds and ownership.
+`fappend` APPENDS; remove a prior source explicitly before replacement. Raw
+body8192 bytes, exact standalone delimiter1..31 bytes, CR/LF/CRLF normalized to
+LF; quotes, backslashes, tabs and UTF8 preserved. Cancellation/invalid controls/
+overflow/RX loss reject without opening the file and STILL require the delimiter
+for draining. RX loss disables raw publication until reboot. This is buffering,
+not flow control. Ordinary command editing/workers/lifecycle remain available.
 
-## What is supported
+For cold proof: `shutdown`, launch `make run-lesson15` again, FIRST `cat hello.c`
+and `cat hello` (binary bytes), then `./hello`/wait WITHOUT running cc or writing.
+The tests compare the entire source and binary, not just names/header/exit8 bits.
 
-[LANGUAGE.md](LANGUAGE.md) defines the bounded integer teaching language:
-64-bit `int`, locals and lexical blocks, assignment, unary and arithmetic /
-comparison operators, if/else, while, return, comments, string escapes,
-`puts("literal")` and `print_int(integer)`. `print_int` is a typed builtin, not
-ISO printf. Unsupported syntax is diagnosed, not skipped. Literal overflow,
-EOF, parse/code/stack/workspace limits all fail before output publication.
-Syntax errors and missing sources preserve the entire old output or absence.
-Parenthesized locals are assignable; unary plus produces a value, not an lvalue.
-Unsupported `++`/`--` and other C multi-character punctuators are rejected with
-maximal munch, never silently split into different valid arithmetic. Whitespace
-and comments still separate supported unary/binary operators. Each `int x;`
-declaration resets its local to zero; references to a declaring local in its own
-initializer (including assignment and shadowing) are rejected explicitly.
-The compiler refuses identical source/output names; the kernel publication
-API additionally protects `cc`, `math_test` and `math.dll`.
+## Explicit contracts
 
-No floating arithmetic, full C preprocessor, pointers, structures, general
-functions or floating/dynamic-math compiler runtime is introduced here. Those
-are later scope. The inherited ABI1 `./math_test` and PIC `math.dll` behavior
-remain available; executable ABI2 arguments do not change the DLL ABI1 table.
+- [LANGUAGE.md](LANGUAGE.md): int64/double types, bounded staged decimal literal
+  rounding (NOT correctly rounded strtod), conversions/traps, truth/NaNs, strict
+  literal-format printf, supported includes (NOT a preprocessor), all limits.
+- [RUNTIME.md](RUNTIME.md): RVEXEC1 ABI3, exact versioned ordinary-file template,
+  fixed prefix/code/strings/BSS, typed APIs and dynamic module lifetime.
+- [FORMAT.md](FORMAT.md): executable/DLL admission. ABI1 math_test and old integer
+  ABI2 still execute. Runtime-requiring new files are unambiguously ABI3.
+- [CONTRACT.md](CONTRACT.md): ownership-before-pointer, fully copied arguments,
+  reserved file region through ZOMBIE/reap, stack/workspace and atomic publication.
+- [softfloat/SOURCE.md](softfloat/SOURCE.md): exact LLVM19.1.7 commit, hashes,
+  Apache-2.0 WITH LLVM-exception license, source list and header isolation flags.
 
-## Integration and bounded memory
+Runtime template is read from `c_runtime` BEFORE publication; kernel and cc use
+strict shared structural validation; packer/linker and runtime guards also check.
+STORE/APPEND protect cc/math_test/math.dll/c_runtime. Missing/corrupt existing
+files never heal. Math exports resolve lazily from ACTUAL math.dll, not from
+compiler/runtime math replacements. Cache use requires a live module handle;
+BSS resets on reexecution. Dynamic-rebind test replaces the actual module via
+the real C filesystem on a disposable disk, keeps WHOLE executable SHA unchanged,
+then cold-runs it and observes ceil42 instead of4.0 without recompilation.
 
-- Boot remains the lesson03 disk loader, with the secondary-hart wrapper and
-  both real harts. No direct-kernel boot shortcut or runtime reseeding.
-- File bytes and READFILE staging remain <=65536. Only ABI2 **memory** may reach
-  1 MiB at 0x80500000; its large compiler buffers are static BSS, not heap growth.
-- ABI2 uses one exclusive 64 KiB stack, 0x80410000–0x80420000. Eight old 4 KiB
-  worker/ABI1 stacks and per-slot argument data remain in their original ranges.
-- Raw bytes and shell BSS live in a shell-only NOLOAD workspace at
-  0x80420000–0x80424000. This relocation avoids the inherited shell's near-full
-  low-BSS region. Link-time and measured checks assert all boundaries.
-- Arguments are fully copied and owned before READY, BSS/stack are initialized,
-  and shared application memory remains reserved through ZOMBIE until reap.
-  Release/acquire publication precedes the receiving hart's own `fence.i`.
-- `fs_store` composes private create/truncate and chunk writes under **one** redo
-  transaction. Deterministic failures restore disk, metadata and handles.
-  Real I/O errors are uncertain, poison the FS and require recovery.
-- Generated files contain native instructions, a small versioned integer-output
-  helper and string data, not source text or an interpreter. `integer-runtime.S`
-  only prints full signed integers through SYS_WRITE. There are no unresolved
-  imports or F/D instructions. These custom containers are not ELF/PE.
+Architecture remains RV64IMAC+Zicsr+Zifencei/lp64; run.py explicitly disables
+F/D/Zfa in QEMU. Double arguments/results use a0/a1, not FP registers. Release/
+acquire publication precedes receiver-local fence.i on BOTH pinned execution
+harts; the module copy is fenced on its own receiving U hart. No page tables,
+W^X security or process isolation is implied by descriptive ELF segment flags.
 
-The actual measured sizes, BSS endpoints, all stack/workspace bounds and static
-stack-usage accounting are generated in `build/lesson15/resource-results.json`.
+File/staging/READFILE limit65536 is distinct from1MiB mapped application memory.
+ABI2 compiler and ABI3 programs use a private64KiB stack. Runtime prefix20KiB,
+generated code32KiB, strings8KiB fit the file cap; runtime-only BSS begins beyond
+payload at80510000. Compiler AST/workspaces are static, not a growing heap.
+`resource-results.json` records actual maps, undefineds, vendor hashes and
+pessimistic bounded static stack accounting including runtime/helper frames.
 
-## Persistence and launch selection
+## Persistent launcher
 
-The new ignored `state/lesson15/disk.img` is copied once from a freshly built
-fixture. Builds, clean and reboot preserve it. Existing missing/corrupt files
-are not self-healed. Run/reset share a nonblocking host lock.
+`state/lesson15/disk.img` is copy-once outside build and survives build/clean/
+reboot. Existing missing/corrupt files are not reseeded. Run/reset use the same
+nonblocking host lock; uppercase `LESSON15_ARGS` is the actual selector:
 
 ```sh
 make run-lesson15 LESSON15_ARGS='--disk state/lesson15/demo.img'
-# Explicitly destructive, replacing only the selected disk:
-python3 lessons/15/run.py --disk state/lesson15/demo.img --reset
+# DESTRUCTIVE replacement of ONLY the selected disk:
+make reset-lesson15 LESSON15_ARGS='--disk state/lesson15/demo.img'
 ```
 
-`make reset-lesson15` destructively resets the default lesson15 disk. No earlier
-lesson or prototype disk is migrated or rewritten. BPTFS12 geometry, 1024-sector
-redo and four-FLUSH protocol are unchanged.
+No prior lesson or prototype disk is migrated/modified. Boot is still lesson03's
+real disk loading path with both harts. BPTFS12 geometry,1024 redo after-images
+and four-FLUSH ordering remain unchanged. Deterministic store failures roll
+back RAM/handles/cursors/disk; real I/O errors are uncertain and poison the FS
+until recovery. Native volatile/durable model, QEMU blkdebug status1 and physical
+power loss are different things; no physical durability/cache certification.
 
 ## Verification
 
 ```sh
-make test-lesson15
-make inspect-lesson15
-make test-lesson15-gdb
+make test-lesson15 inspect-lesson15 test-lesson15-gdb
 make test-lesson15-evidence
-python3 lessons/15/frontend-fail-first.py
 make all test inspect
 make test-lesson07-gdb test-lesson08-gdb test-lesson09-gdb
 make test-lesson10-gdb test-lesson11-gdb test-lesson12-gdb
-make test-lesson13-gdb test-lesson15-gdb
+make test-lesson13-gdb test-lesson14-gdb test-lesson15-gdb
 ```
 
-The ordinary gate invalidates old logs/results before build or imports. Its
-real PTY tests paste multiple unrelated programs and verify actual cc launch,
-full native bytes, exact PID exit/wait/reap, full-width results and cold read-first
-source/output execution with no recompilation. Operators include negative signed
-division/remainder, zero divisors, INT64_MIN/-1 and wrapping arithmetic; independent
-expectations use exact integers, never float division. Larger programs emit over
-a page of code. Scope, spelling, precedence, branch and string variations are
-covered, alongside negative compiler output preservation and raw input boundaries.
+The ordinary gate invalidates evidence before build/import/setup. It runs:
+independent full-int and Python IEEE full-bit results; NaN classification,
+signed-zero/subnormal/infinity/overflow/underflow cases; native helper tests
+with F/D disabled; actual unchanged integer14 ABI2 output; full demo/cold/rebind;
+strict template mutants through real guest cc and ABI3 admission; full old
+output/source/absence preservation; inherited lexer/resource/raw/atomic-store
+regressions; source AND template READ, publication WRITE/FLUSH and late runtime
+DLL READ actual virtio IOERR status1; malformed/missing DLL/no healing; actual
+broken float emitter/conversion/dispatch/runtime API plus integer emitters.
 
-`frontend-test.py` is included in the ordinary gate: 80 invalid real U-mode
-compilations across lvalues, increment, decrement, initializers and other
-unsupported punctuators check exact line/type/token diagnostics, nonzero exit,
-no success banner, full old executable/source preservation and missing-output
-absence. Fifteen valid compile/execute/reap recovery runs check parenthesized
-assignment, spaced/comment-separated unary signs, right-associative assignment,
-scope, per-iteration zero initialization and full-width integers. Boot bytes,
-clean journal and raw filesystem invariants are checked independently. Thirty-five
-mutations of captured evidence attack the new rejection oracle.
-`frontend-fail-first.py` builds the unchanged `dba51e6` archive in scratch and
-runs the identical regression separately for lvalue, increment, decrement and
-self-initializer defects; all four must fail with actual old compiler status0,
-old-file overwrite and missing-file creation, not just changed diagnostic text.
-Its receipt/logs remain in the printed scratch archive. No old history is edited.
+Real GDB stops U cc and emitted entry on both harts, checks whole payload,
+argv/native instructions, both local application fences, runtime module fences
+and actual relocated DLL export execution. Six malformed admissions compare the
+entire1MiB app arena and all process states before/after rejection. UART and
+shutdown continue after detach. Evidence attacks run real nonzero/timeout/early
+children and fake GDB/wrong CC, retain binary partial output, kill/drain/reap,
+then restore actual gates. No stale PASS may survive an early failed run.
 
-Native tests exercise actual C store/append, deterministic rollback, all journal
-cut phases and both persisted/nonpersisted I/O-error outcomes. A reduced-capacity
-native build exercises defensive J_LIMIT rollback; production geometry remains
-1024. Real QEMU blkdebug tests separately report virtio status1 for compiler
-READ/WRITE/FLUSH failures, exact exit/reap and sticky failure/cold recovery.
-Actual broken subtraction/branch/local-store compilers are cross-built only as
-mutants, run in U mode, and rejected by the same full-result oracle. Captured
-PID/status/header/code/source/cold byte mutations are also rejected.
-
-GDB checks compiler AND emitted-program U entry, complete bytes against the
-persisted files, copied argv, actual native instructions and both receiving harts'
-local fence. UART continues after detach. This is QEMU architectural evidence,
-not a physical instruction-cache or power-cut certification. Flat PMP still
-permits RAM access; syscall admission is not a security sandbox.
-
-Artifacts under `build/lesson15/`: `results.json`, `runtime-results.json`,
-`resource-results.json`, `store-results.json`, `mutation-results.json`,
-`compiler-uart.log`, `compiler-cold.log`, `compiler-verified.img`, `raw-loss.log`,
-`io-compiler-*.log`, `gdb-loader.log`, and launcher/mutant transcripts.
-`frontend-all-results.json` and `frontend-all-uart.log` record the focused
-regressions; the outer `results.json` also includes their results.
-The evidence gate rejects wrong CC, early debugger setup and fake GDB, retains
-partial/timeout child output, reaps children, then restores actual runtime/GDB
-checks. Attack transcripts are retained in `$TMPDIR/lesson15-evidence/`.
+Per-run machine reports/logs are under `build/lesson15/` (ignored). Final scratch
+receipt names exact candidate SHA and command exits; parent SPEC/QUALITY/fresh
+archive review is separate from writer execution evidence. No CI/tag/push/cloud
+or publication is part of this implementation.

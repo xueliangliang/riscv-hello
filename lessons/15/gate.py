@@ -51,7 +51,8 @@ def main():
             path.unlink()
     (BUILD/'gdb-loader.log').write_bytes(b'')
     cc=os.environ.get('CC','riscv64-linux-gnu-gcc')
-    commands=[('gate-build',['make','--no-print-directory','-B','lesson15', f'CC={cc}']),
+    commands=[('gate-toolchain',[sys.executable,'lessons/15/toolchain-test.py',cc]),
+              ('gate-build',['make','--no-print-directory','-B','lesson15', f'CC={cc}']),
               ('gate-resources',[sys.executable,'lessons/15/resource-test.py']),
               ('gate-helpers',[sys.executable,'lessons/15/helper-test.py']),
               ('gate-legacy-ABI2',[sys.executable,'lessons/15/legacy-test.py']),

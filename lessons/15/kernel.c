@@ -5,6 +5,15 @@
 #include "formats.h"
 #include "snapshot.h"
 static unsigned char file_staging[APP_LIMIT];
+/* Debugger-only observable boundaries; neither publishes nor changes memory. */
+__attribute__((noinline)) void application_admission_begin(void)
+{
+    __asm__ volatile("" ::: "memory");
+}
+__attribute__((noinline)) void application_rejected(void)
+{
+    __asm__ volatile("" ::: "memory");
+}
 static int file_slot = -1;
 static struct Executable file_image;
 
@@ -383,7 +392,9 @@ static long exec_file(unsigned long pointer, unsigned long second, unsigned long
         return size;
     }
     struct Executable candidate;
+    application_admission_begin();
     if (!executable_valid(file_staging, size, &candidate)) {
+        application_rejected();
         return E_ARG;
     }
     if (candidate.abi == 1 && second) {

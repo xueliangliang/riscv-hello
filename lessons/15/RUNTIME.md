@@ -1,4 +1,4 @@
-# Frozen runtime15 contract (implementation acceptance pending)
+# Frozen runtime15 contract
 
 RV64IMAC_Zicsr_Zifencei, lp64: binary64 arguments/results occupy integer a0/a1,
 never floating registers. Host-built guest compiler, not self-hosting or ISO C.
