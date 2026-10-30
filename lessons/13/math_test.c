@@ -71,10 +71,21 @@ int app_main(void)
         bss_probe[i] = 0xa5;
     }
     record("APP", syscall2(SYS_HART, 0, 0), APP_BASE, sizeof(bss_probe));
+    sleep_ticks(50); /* makes live reservation observable to the shell */
     require(syscall3(FS_OPEN, 0, FS_REPLACE, 0) == E_OWNER, "FAIL app handle owner\n");
     require(syscall2(SYS_EXEC, 0, 0) == E_OWNER, "FAIL app exec owner\n");
     require(syscall3(SYS_READFILE, 0, (unsigned long)snapshot_probe, sizeof(snapshot_probe)) == E_ARG,
             "FAIL snapshot filename pointer\n");
+    char unterminated[32];
+    for (unsigned i = 0; i < sizeof(unterminated); i++) {
+        unterminated[i] = 'x';
+    }
+    require(syscall3(SYS_READFILE, (unsigned long)unterminated,
+                     (unsigned long)snapshot_probe, sizeof(snapshot_probe)) == E_ARG,
+            "FAIL unterminated filename\n");
+    require(syscall3(SYS_READFILE, (unsigned long)"math.dll",
+                     (unsigned long)snapshot_probe, 0) == E_ARG,
+            "FAIL zero snapshot capacity\n");
     require(syscall3(SYS_READFILE, (unsigned long)"math.dll", ~0UL, 4) == E_ARG,
             "FAIL snapshot destination overflow\n");
     require(syscall3(SYS_READFILE, APP_BASE + APP_LIMIT - 1, (unsigned long)snapshot_probe, 4) == E_ARG,
@@ -82,14 +93,19 @@ int app_main(void)
     for (unsigned i = 0; i < sizeof(snapshot_probe); i++) {
         snapshot_probe[i] = 0x6d;
     }
-    require(syscall3(SYS_READFILE, (unsigned long)"math.dll", (unsigned long)snapshot_probe, 1) == F_LIMIT,
-            "FAIL snapshot capacity\n");
+    long capacity_result = syscall3(SYS_READFILE, (unsigned long)"math.dll",
+                                    (unsigned long)snapshot_probe, 1);
+    if (capacity_result == F_MISSING) {
+        say("MODULE_MISSING_OR_INVALID\n");
+        return 41;
+    }
+    require(capacity_result == F_LIMIT, "FAIL snapshot capacity\n");
     require(syscall3(SYS_READFILE, (unsigned long)"missing.dll", (unsigned long)snapshot_probe, 4096) == F_MISSING,
             "FAIL missing snapshot\n");
     for (unsigned i = 0; i < sizeof(snapshot_probe); i++) {
         require(snapshot_probe[i] == 0x6d, "FAIL failed snapshot partial copy\n");
     }
-    for (unsigned i = 0; i < 16; i++) {
+    for (unsigned i = 0; i < 18; i++) {
         char name[] = "bad00.dll";
         name[3] = '0' + i / 10;
         name[4] = '0' + i % 10;
@@ -130,6 +146,18 @@ int app_main(void)
                 end = append(end, names[n]);
                 *end = 0;
                 record(label, a, b, got);
+            }
+            if (signature == DLL_BINARY) {
+                const unsigned long pairs[][2] = {
+                    {0, 0x8000000000000000UL},
+                    {0x8000000000000000UL, 0},
+                    {0x7ff8000000000123UL, 0x7ff8000000000456UL},
+                    {0x4000000000000000UL, 0x4000000000000000UL}
+                };
+                for (unsigned i = 0; i < sizeof(pairs) / sizeof(pairs[0]); i++) {
+                    unsigned long got = call_symbol(pointer, signature, pairs[i][0], pairs[i][1]);
+                    record(label, pairs[i][0], pairs[i][1], got);
+                }
             }
         }
         stale = handle;

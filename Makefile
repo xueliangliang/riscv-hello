@@ -665,14 +665,14 @@ build/lesson13/disk-no-flush.img: build/lesson13/kernel-no-flush.bin build/lesso
 lesson13: build/lesson13/bootloader.elf build/lesson13/disk.img
 all: lesson13
 run-lesson13: lesson13
-	QEMU="$(QEMU)" $(PYTHON) lessons/13/run.py $(LESSON12_ARGS)
+	QEMU="$(QEMU)" $(PYTHON) lessons/13/run.py $(LESSON13_ARGS)
 reset-lesson13: lesson13
 	$(PYTHON) lessons/13/run.py --reset
 # --reset is explicit destructive replacement, protected by the same host lock.
-test-lesson13: lesson13
-	QEMU="$(QEMU)" $(PYTHON) lessons/13/test.py
+test-lesson13:
+	QEMU="$(QEMU)" CC="$(CC)" $(PYTHON) lessons/13/gate.py
 test: test-lesson13
-inspect-lesson13: build/lesson13/bootloader.elf build/lesson13/kernel.elf build/lesson13/user.elf
+inspect-lesson13: build/lesson13/bootloader.elf build/lesson13/kernel.elf build/lesson13/user.elf build/lesson13/math_test.elf build/lesson13/math.elf
 	$(READELF) -h -lW $^
 	$(OBJDUMP) -d $^
 inspect: inspect-lesson13
@@ -699,3 +699,19 @@ build/lesson13/math_test.elf: build/lesson13/app-start.o build/lesson13/math_tes
 build/lesson13/math_test.exec: build/lesson13/math_test.elf lessons/13/pack.py
 	$(OBJCOPY) -O binary $< build/lesson13/math_test.raw
 	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/13/pack.py executable $< build/lesson13/math_test.raw $@
+
+.PHONY: test-lesson13-gdb test-lesson13-evidence
+# No prerequisites: invalidate evidence BEFORE even a recursive build fails.
+test-lesson13-gdb:
+	@mkdir -p build/lesson13
+	$(PYTHON) lessons/13/fresh-log.py build/lesson13/gdb-loader.log
+	+$(MAKE) --no-print-directory lesson13
+	QEMU="$(QEMU)" $(PYTHON) lessons/13/gdb-test.py
+test-lesson13-evidence:
+	$(PYTHON) lessons/13/evidence-test.py
+
+build/lesson13/io_test.elf: build/lesson13/app-start.o build/lesson13/io_test.o build/lesson13/module_loader.o build/lesson13/formats.o build/lesson13/syscall.o lessons/13/app.ld
+	$(CC) $(LOADER_FLAGS) -nostdlib -static -Wl,--build-id=none -T lessons/13/app.ld -o $@ $(filter %.o,$^)
+build/lesson13/io_test.exec: build/lesson13/io_test.elf lessons/13/pack.py
+	$(OBJCOPY) -O binary $< build/lesson13/io_test.raw
+	CROSS_COMPILE="$(CROSS_COMPILE)" $(PYTHON) lessons/13/pack.py executable $< build/lesson13/io_test.raw $@

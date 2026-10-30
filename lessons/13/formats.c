@@ -27,8 +27,8 @@ int executable_valid(const unsigned char *p, unsigned long size, struct Executab
         load32(p + 32) != 1 || load32(p + 40) || load32(p + 44)) {
         return 0;
     }
-    if (!code || code > payload || payload > memory || memory > APP_LIMIT ||
-        (payload & 15) || (memory & 15) || entry >= code || (entry & 1)) {
+    if (code < 2 || (code & 1) || code > payload || payload > memory || memory > APP_LIMIT ||
+        (payload & 15) || (memory & 15) || entry > code - 2 || (entry & 1)) {
         return 0;
     }
     out->payload = payload;
@@ -69,7 +69,7 @@ static int name_valid(const unsigned char *name)
 }
 int module_valid(const unsigned char *p, unsigned long size)
 {
-    if (size < 32 || size > DLL_LIMIT || !magic_matches(p, "RVDLL01\0")) {
+    if (size < 32 || size > DLL_LIMIT || (size & 1) || !magic_matches(p, "RVDLL01\0")) {
         return 0;
     }
     uint32_t table = load32(p + 16);

@@ -6,8 +6,8 @@ import subprocess
 class Native:
     def __init__(self, image):
         target=Path('build/lesson13/storage.so')
-        sources=[Path('lessons/13')/name for name in ('model.c','fs.c','journal.c','workload.c','snapshot.c')]
-        if not target.exists() or any(p.stat().st_mtime>target.stat().st_mtime for p in sources):
+        sources=[Path('lessons/13')/name for name in ('model.c','native-fs.c','journal.c','workload.c','snapshot.c')]
+        if not target.exists() or any(p.stat().st_mtime>target.stat().st_mtime for p in sources+[Path("lessons/13/fs.c")]):
             subprocess.run(['cc','-shared','-fPIC','-O1','-Wall','-Wextra','-Werror','-Ilessons/13','-Ilessons/02',
                             *map(str,sources),'-o',str(target)],check=True)
         self.lib=c.CDLL(str(target.resolve()))
@@ -16,6 +16,7 @@ class Native:
             'model_run':([c.c_uint],c.c_long),
             'model_trace_overflow':([],c.c_uint),
             'model_fault':([c.c_int,c.c_long,c.c_uint,c.c_int],None),
+            'test_live_handles':([],c.c_uint),
             'fs_open':([c.c_char_p,c.c_uint],c.c_long),
             'fs_write':([c.c_long,c.c_void_p,c.c_uint],c.c_long),
             'fs_read':([c.c_long,c.c_void_p,c.c_uint],c.c_long),

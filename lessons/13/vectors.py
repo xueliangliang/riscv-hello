@@ -12,7 +12,8 @@ def negatives(app, dll):
             'trailing': app+b'x', 'entry': u32(app,20,0xffffffff),
             'alignment': u32(app,20,1), 'address': u32(app,24,0x80400000),
             'memory': u32(app,28,0xffffffff), 'abi': u32(app,32,2),
-            'reserved': u32(app,44,1), 'code': u32(app,36,0)}
+            'reserved': u32(app,44,1), 'code': u32(app,36,0),
+            'short-code':u32(app,36,1), 'odd-code':u32(app,36,3)}
     table = struct.unpack_from('<I',dll,16)[0]
     code = struct.unpack_from('<I',dll,24)[0]
     modules = {'truncated':dll[:31], 'magic':b'X'+dll[1:],
@@ -22,7 +23,9 @@ def negatives(app, dll):
                'alignment':u32(dll,table+16,code+1),
                'range':u32(dll,table+16,len(dll)),
                'signature':u32(dll,table+20,3), 'abi':u32(dll,28,2),
-               'count':u32(dll,20,0xffffffff)}
+               'count':u32(dll,20,0xffffffff),
+               'oversized':dll+bytes(4098-len(dll)),
+               'odd-image':u32(dll+b'x',12,len(dll)+1)}
     for name, value in [('empty',bytes(16)), ('unterminated',b'x'*16),
                          ('padding',b'a\0x'+bytes(13))]:
         modules[name]=dll[:table]+value+dll[table+16:]

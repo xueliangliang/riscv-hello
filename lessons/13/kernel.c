@@ -190,7 +190,7 @@ static void reap(struct Process *child)
 {
     event("reap", child->pid, child->status);
     /* Keep generation, but not PID validity. No allocation before this step. */
-    if (child == &processes[file_slot < 0 ? 0 : file_slot]) {
+    if (file_slot >= 0 && child == &processes[file_slot]) {
         file_slot = -1;
     }
     child->state = FREE;

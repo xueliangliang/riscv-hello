@@ -14,7 +14,12 @@ static void clear(unsigned char *bytes, unsigned size)
 }
 __attribute__((noinline)) void module_fence(void)
 {
+#ifdef __riscv
     __asm__ volatile("fence.i" ::: "memory");
+#else
+    /* Native parser/lifecycle tests never execute RISC-V module code. */
+    __asm__ volatile("" ::: "memory");
+#endif
 }
 Module module_load(const char *name)
 {
